@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Foundry & Frontier - Update Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow-bg"></div>
+  
+  <div class="container">
+    <header class="header">
+      <div class="logo-area">
+        <span class="logo-badge">FF</span>
+        <div>
+          <h1>Foundry & Frontier</h1>
+          <p class="subtitle">Update Manager Server</p>
+        </div>
+      </div>
+      <div class="server-status">
+        <span class="status-indicator online"></span>
+        <span>Servidor Ativo</span>
+      </div>
+    </header>
+
+    <div class="dashboard-grid">
+      <!-- Formulário de Nova Versão -->
+      <section class="card form-section">
+        <div class="card-header">
+          <h2>Novo Pacote de Atualização</h2>
+          <p>Envie o arquivo ZIP contendo as diferenças da versão</p>
+        </div>
+        
+        <form id="updateForm" enctype="multipart/form-data">
+          <div class="form-row-grid">
+            <div class="form-group">
+              <label for="from_version">Versão de Origem</label>
+              <input type="text" id="from_version" name="from_version" placeholder="Ex: 1.0.0" required>
+            </div>
+            <div class="form-group">
+              <label for="to_version">Versão de Destino</label>
+              <input type="text" id="to_version" name="to_version" placeholder="Ex: 1.0.1" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="zip_file">Arquivo ZIP (Diff)</label>
+            <div class="file-input-wrapper" id="fileDropZone">
+              <input type="file" id="zip_file" name="zip_file" accept=".zip" required>
+              <div class="file-input-placeholder">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span class="file-text">Arraste ou clique para selecionar o .zip</span>
+                <span class="file-name" id="selectedFileName">Nenhum arquivo selecionado</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="description">Descrição / Changelog</label>
+            <textarea id="description" name="description" rows="3" placeholder="O que mudou nessa versão? Ex: Adicionado mod Carry On e receitas de Steel." required></textarea>
+          </div>
+
+          <div class="form-group">
+            <div class="label-with-help">
+              <label for="removed_files">Arquivos para Remover (Opcional)</label>
+              <span class="help-tooltip" title="Escreva um caminho relativo por linha (ex: mods/modvelho-1.0.jar)">?</span>
+            </div>
+            <textarea id="removed_files" name="removed_files" rows="3" placeholder="Exemplo:&#10;mods/Rubidium-1.0.jar&#10;config/some-old-config.toml"></textarea>
+            <p class="input-tip">Estes arquivos serão excluídos do cliente antes de extrair o zip.</p>
+          </div>
+
+          <button type="submit" class="btn btn-primary" id="btnSubmit">
+            <span class="btn-text">Publicar Atualização</span>
+            <span class="spinner" id="btnSpinner"></span>
+          </button>
+        </form>
+      </section>
+
+      <!-- Lista de Versões -->
+      <section class="card list-section">
+        <div class="card-header list-header">
+          <div>
+            <h2>Cadeia de Atualizações</h2>
+            <p>Sequência de atualizações disponibilizadas para os players</p>
+          </div>
+          <div class="version-badge-container">
+            <span class="badge-label">Última Versão:</span>
+            <span class="badge-value" id="latestVersionBadge">1.0.0</span>
+          </div>
+        </div>
+
+        <div class="updates-list-wrapper">
+          <div id="loadingState" class="list-state">
+            <div class="spinner-large"></div>
+            <p>Carregando atualizações...</p>
+          </div>
+          
+          <div id="emptyState" class="list-state hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="empty-icon"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            <p>Nenhuma atualização cadastrada ainda.</p>
+            <p class="sub-text">Preencha o formulário para registrar a primeira transição.</p>
+          </div>
+
+          <div id="updatesList" class="updates-list">
+            <!-- Cards serão gerados dinamicamente via JS -->
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Toast de Notificação -->
+  <div id="toast" class="toast">
+    <div class="toast-content">
+      <span class="toast-message" id="toastMessage">Mensagem de teste</span>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

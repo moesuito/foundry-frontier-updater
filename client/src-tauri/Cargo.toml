@@ -1,0 +1,21 @@
+[package]
+name = "foundry_frontier_sync"
+version = "1.0.0"
+description = "Atualizador oficial de modpacks Foundry & Frontier"
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1", features = [] }
+
+[dependencies]
+tauri = { version = "1", features = ["shell-open", "dialog"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+zip = "2.1"
+directories = "5.0"
+open = "3.2"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

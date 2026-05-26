@@ -1,0 +1,28 @@
+# Dependências Node.js
+server/node_modules/
+client/node_modules/
+
+# Build artifacts do Rust/Tauri
+client/src-tauri/target/
+
+# Uploads de patches (dados de runtime, não versionáveis)
+server/uploads/
+
+# Arquivos de lock do Node (opcional, mas recomendado incluir)
+# Descomente se NÃO quiser versionar os lock files:
+# server/package-lock.json
+# client/package-lock.json
+
+# Dados de runtime do banco
+# server/updates.json  ← versionado como template inicial
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tauri dev artifacts
+client/src-tauri/WixTools/
