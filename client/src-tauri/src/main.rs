@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use serde::{Deserialize, Serialize};
 use directories::BaseDirs;
 
