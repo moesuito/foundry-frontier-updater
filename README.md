@@ -28,7 +28,7 @@ O executavel usa a URL base do dashboard principal configurada em
 `client/src/main.js`:
 
 ```javascript
-const SERVER_URL = 'https://desktop-2hplad1.polecat-atria.ts.net';
+const SERVER_URL = 'https://server-alano.polecat-atria.ts.net';
 ```
 
 Rotas publicas usadas pelo app:

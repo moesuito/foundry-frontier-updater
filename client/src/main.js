@@ -9,7 +9,7 @@ const btnWinClose = document.getElementById('btnWinClose');
 
 // Painel Setup
 const paneSetup = document.getElementById('paneSetup');
-const SERVER_URL = 'https://desktop-2hplad1.polecat-atria.ts.net';
+const SERVER_URL = 'https://server-alano.polecat-atria.ts.net';
 const instancesStatus = document.getElementById('instancesStatus');
 const instancesEmpty = document.getElementById('instancesEmpty');
 const instancesList = document.getElementById('instancesList');
