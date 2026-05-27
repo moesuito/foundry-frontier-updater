@@ -1,6 +1,6 @@
 [package]
 name = "foundry_frontier_sync"
-version = "1.0.2"
+version = "1.0.0"
 description = "Atualizador oficial de modpacks Foundry & Frontier"
 authors = ["you"]
 edition = "2021"
