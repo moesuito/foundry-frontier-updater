@@ -44,7 +44,7 @@
       "windows": {
         "nsis": {
           "installMode": "currentUser",
-          "languages": ["SimpChinese"],
+          "languages": ["PortugueseBR"],
           "displayLanguageSelector": false
         }
       },
