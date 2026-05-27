@@ -3,7 +3,19 @@ const { invoke } = window.__TAURI__.tauri;
 const { appWindow } = window.__TAURI__.window;
 const { listen } = window.__TAURI__.event;
 
-// Elementos do DOM
+// --- Elementos do DOM: Self-Update ---
+const paneSelfUpdate    = document.getElementById('paneSelfUpdate');
+const selfUpdateTitle   = document.getElementById('selfUpdateTitle');
+const selfUpdateSubtitle = document.getElementById('selfUpdateSubtitle');
+const selfUpdateSpinner = document.getElementById('selfUpdateSpinner');
+const selfUpdateProgressWrap = document.getElementById('selfUpdateProgressWrap');
+const selfUpdateProgressFill = document.getElementById('selfUpdateProgressFill');
+const selfUpdateProgressLabel = document.getElementById('selfUpdateProgressLabel');
+const selfUpdateProgressPct = document.getElementById('selfUpdateProgressPct');
+const selfUpdateWarnBox = document.getElementById('selfUpdateWarnBox');
+const selfUpdateWarnText = document.getElementById('selfUpdateWarnText');
+
+// Elementos do DOM — restante dos paineis
 const btnWinMinimize = document.getElementById('btnWinMinimize');
 const btnWinClose = document.getElementById('btnWinClose');
 
@@ -64,11 +76,146 @@ let selectedInstance = null;
 let pendingUpdates = [];
 let latestVersion = '1.0.0';
 let selectedLauncher = null;
+// Timeout para fallback de conectividade na verificação do app
+const SELF_UPDATE_FAIL_TIMEOUT_MS = 5000;
 
+// ---------------------------------------------------------------------------
+// U1.4 — Mandatory App Self-Update Flow
+// ---------------------------------------------------------------------------
+
+/**
+ * Hides paneSelfUpdate and shows the launcher selection pane.
+ * Called when no update is needed or after a network failure timeout.
+ */
+function selfUpdateContinue() {
+  paneSelfUpdate.classList.remove('active');
+  paneLauncherSelect.classList.add('active');
+}
+
+/**
+ * Main self-update check. Called immediately on startup.
+ * Blocks the UI until the check resolves; on failure it fails open after
+ * SELF_UPDATE_FAIL_TIMEOUT_MS and shows a warning.
+ */
+async function runSelfUpdateCheck() {
+  // Start listening for download progress events from Rust
+  const unlistenProgress = await listen('app-update-progress', (event) => {
+    const pct = event.payload;
+    selfUpdateProgressFill.style.width = `${pct}%`;
+    selfUpdateProgressPct.textContent = `${pct}%`;
+  });
+
+  let checkResult = null;
+
+  try {
+    // Race the API call against the fail-open timeout
+    checkResult = await Promise.race([
+      invoke('check_app_update'),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), SELF_UPDATE_FAIL_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err) {
+    // Network unreachable or timeout — fail open with a warning
+    unlistenProgress();
+    selfUpdateSpinner.style.display = 'none';
+    selfUpdateTitle.textContent = 'Verificação Ignorada';
+    selfUpdateSubtitle.textContent = 'Não foi possível verificar atualizações do aplicativo.';
+    selfUpdateWarnText.textContent =
+      err && err.message === 'timeout'
+        ? 'GitHub inacessível. Continuando sem verificar atualização…'
+        : `Falha na conexão: ${err}. Continuando…`;
+    selfUpdateWarnBox.classList.remove('hidden');
+    console.warn('[self-update] check failed:', err);
+    // Continue after a brief pause to let the user read the message
+    await sleep(2500);
+    selfUpdateContinue();
+    return;
+  }
+
+  if (!checkResult.updateAvailable) {
+    // No update — show success briefly then continue
+    unlistenProgress();
+    selfUpdateSpinner.style.display = 'none';
+    selfUpdateTitle.textContent = 'Aplicativo Atualizado';
+    selfUpdateSubtitle.textContent = checkResult.message;
+    await sleep(800);
+    selfUpdateContinue();
+    return;
+  }
+
+  // Update available — must update before continuing
+  if (!checkResult.downloadUrl) {
+    unlistenProgress();
+    selfUpdateSpinner.style.display = 'none';
+    selfUpdateTitle.textContent = 'Atualização Disponível';
+    selfUpdateSubtitle.textContent = checkResult.message;
+    selfUpdateWarnText.textContent =
+      'Asset de download não encontrado na release. Continuando sem atualizar…';
+    selfUpdateWarnBox.classList.remove('hidden');
+    await sleep(3000);
+    selfUpdateContinue();
+    return;
+  }
+
+  // Show download progress UI
+  selfUpdateTitle.textContent = `Atualizando para ${checkResult.latestTag}…`;
+  selfUpdateSubtitle.textContent = 'Baixando nova versão do aplicativo…';
+  selfUpdateProgressWrap.classList.remove('hidden');
+
+  let zipPath;
+  try {
+    zipPath = await invoke('download_app_update', {
+      downloadUrl: checkResult.downloadUrl,
+    });
+  } catch (err) {
+    unlistenProgress();
+    selfUpdateSpinner.style.display = 'none';
+    selfUpdateTitle.textContent = 'Falha no Download';
+    selfUpdateSubtitle.textContent = 'Não foi possível baixar a atualização.';
+    selfUpdateWarnText.textContent = `${err}. Continuando sem atualizar…`;
+    selfUpdateWarnBox.classList.remove('hidden');
+    await sleep(3000);
+    selfUpdateContinue();
+    return;
+  }
+
+  unlistenProgress();
+
+  // Determine install dir and current exe path for the helper
+  selfUpdateTitle.textContent = 'Aplicando Atualização…';
+  selfUpdateSubtitle.textContent = 'O aplicativo será reiniciado automaticamente.';
+
+  try {
+    // Rust knows current exe; we pass the same path for relaunch.
+    // install_dir = directory of the current exe.
+    // These are passed through Rust, so we fetch them via a dedicated invoke
+    // or we pass empty strings and let Rust figure it out from current_exe().
+    await invoke('launch_updater_helper', {
+      zipPath,
+      installDir: '',   // Rust fills in from current_exe().parent()
+      appExe: '',       // Rust fills in from current_exe()
+    });
+    // App exits inside Rust — we won't reach this line.
+  } catch (err) {
+    selfUpdateSpinner.style.display = 'none';
+    selfUpdateTitle.textContent = 'Falha ao Iniciar Helper';
+    selfUpdateSubtitle.textContent = 'Não foi possível iniciar o processo de atualização.';
+    selfUpdateWarnText.textContent = `${err}. Continuando…`;
+    selfUpdateWarnBox.classList.remove('hidden');
+    await sleep(3000);
+    selfUpdateContinue();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Inicialização
+// ---------------------------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', () => {
   setupTitleBar();
-  // Não escaneia direto, espera a escolha de launcher na tela inicial
+  // Verificação obrigatória de atualização do app — bloqueia até resolver
+  runSelfUpdateCheck();
 
   // Eventos de clique para seleção de launcher
   btnSelectPolyMC.addEventListener('click', () => selectLauncher('PolyMC'));
@@ -83,6 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnFinishUpToDate.addEventListener('click', showSetupPane);
   btnFinishSuccess.addEventListener('click', showSetupPane);
 });
+
 
 // Exibir Toast de Erro
 function showToast(message) {

@@ -1,0 +1,108 @@
+name: Build Release Artifacts
+
+# Triggered manually via workflow_dispatch or on version tag push.
+# Does NOT publish a GitHub Release automatically — the Orchestrator
+# reviews artifacts and creates the release manually after approval.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to use (e.g. v1.0.2). Leave empty to use tauri.conf.json version.'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client/src-tauri
+
+      - name: Install NSIS
+        # Tauri v1 uses the system makensis binary for NSIS bundling.
+        run: choco install nsis --no-progress -y
+        shell: pwsh
+
+      - name: Install Node dependencies
+        run: npm --prefix client install
+        working-directory: updaterapp
+
+      - name: Build Tauri app (NSIS installer + main exe)
+        run: npm --prefix client run tauri build -- --bundles nsis
+        working-directory: updaterapp
+
+      - name: Build updater-helper binary
+        run: cargo build --release --bin updater-helper
+        working-directory: updaterapp/client/src-tauri
+
+      - name: Package release artifacts
+        run: |
+          powershell -ExecutionPolicy Bypass -File updaterapp/scripts/package-release.ps1
+        shell: pwsh
+
+      - name: Read version from tauri.conf.json
+        id: read_version
+        run: |
+          $conf = Get-Content 'updaterapp/client/src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $ver = $conf.package.version
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-v${{ steps.read_version.outputs.VERSION }}
+          path: |
+            updaterapp/release/${{ steps.read_version.outputs.VERSION }}/foundry_frontier_sync_setup.exe
+            updaterapp/release/${{ steps.read_version.outputs.VERSION }}/foundry_frontier_sync_portable.zip
+            updaterapp/release/${{ steps.read_version.outputs.VERSION }}/version.json
+            updaterapp/release/${{ steps.read_version.outputs.VERSION }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Run helper test suite
+        # Runs tests against the just-built helper binary.
+        # Requires NSIS build to have completed so the helper binary exists.
+        run: |
+          powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-updater-helper.ps1
+        shell: pwsh
+
+# ---------------------------------------------------------------------------
+# To publish a GitHub Release after reviewing the artifacts:
+#
+#   1. Download and inspect the artifacts from the Actions run.
+#   2. Verify SHA256SUMS.txt manually.
+#   3. Create a GitHub Release via the web UI or:
+#
+#      gh release create v<VERSION> \
+#        updaterapp/release/<VERSION>/foundry_frontier_sync_setup.exe \
+#        updaterapp/release/<VERSION>/foundry_frontier_sync_portable.zip \
+#        updaterapp/release/<VERSION>/version.json \
+#        updaterapp/release/<VERSION>/SHA256SUMS.txt \
+#        --title "Foundry & Frontier Sync v<VERSION>" \
+#        --notes "See changelog."
+#
+#   Never push/publish from a Worker. Only the Orchestrator may do this
+#   after explicit user approval.
+# ---------------------------------------------------------------------------

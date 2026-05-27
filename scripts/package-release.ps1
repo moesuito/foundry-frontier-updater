@@ -118,6 +118,16 @@ New-Item -ItemType Directory -Force -Path $FolderInZip | Out-Null
 Copy-Item -LiteralPath $AppExe -Destination (Join-Path $FolderInZip 'Foundry & Frontier Sync.exe') -Force
 Copy-Item -LiteralPath $VersionJsonPath -Destination (Join-Path $FolderInZip 'version.json') -Force
 
+# Include updater-helper.exe if it was compiled (U1.2)
+$HelperExe = Join-Path $TargetDir 'updater-helper.exe'
+if (Test-Path -LiteralPath $HelperExe) {
+    Copy-Item -LiteralPath $HelperExe -Destination (Join-Path $FolderInZip 'updater-helper.exe') -Force
+    Write-Host "  Incluido updater-helper.exe no portable zip."
+} else {
+    Write-Warning "updater-helper.exe nao encontrado em $HelperExe - portable zip sera criado sem ele."
+    Write-Warning "Execute 'cargo build --release --bin updater-helper' para compilar o helper."
+}
+
 $PortableZipName = 'foundry_frontier_sync_portable.zip'
 $PortableZipPath = Join-Path $ReleaseDir $PortableZipName
 

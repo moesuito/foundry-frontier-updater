@@ -17,8 +17,42 @@
   <!-- Conteúdo Principal -->
   <main class="app-viewport">
     
+    <!-- TELA -1: Verificação obrigatória de atualização do próprio app -->
+    <section id="paneSelfUpdate" class="pane-view active">
+      <div class="self-update-layout">
+        <div class="self-update-logo-area">
+          <div class="self-update-logo-ring" id="selfUpdateLogoRing">
+            <div class="self-update-spinner" id="selfUpdateSpinner"></div>
+          </div>
+          <span class="self-update-app-name">Foundry &amp; Frontier Sync</span>
+        </div>
+
+        <div class="self-update-content">
+          <h2 id="selfUpdateTitle">Verificando Atualizações…</h2>
+          <p id="selfUpdateSubtitle" class="self-update-subtitle">Por favor aguarde enquanto verificamos se há uma atualização do aplicativo.</p>
+
+          <!-- Barra de progresso (visível somente durante o download) -->
+          <div class="self-update-progress-wrap hidden" id="selfUpdateProgressWrap">
+            <div class="win-progress-track">
+              <div class="win-progress-fill" id="selfUpdateProgressFill" style="width: 0%"></div>
+            </div>
+            <div class="progress-details-row">
+              <span id="selfUpdateProgressLabel">Baixando atualização…</span>
+              <span id="selfUpdateProgressPct">0%</span>
+            </div>
+          </div>
+
+          <!-- Estado: erro / aviso de conectividade -->
+          <div class="self-update-warn hidden" id="selfUpdateWarnBox">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span id="selfUpdateWarnText">Não foi possível verificar atualizações. Continuando…</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- TELA 0: Seleção de Launcher -->
-    <section id="paneLauncherSelect" class="pane-view active">
+    <section id="paneLauncherSelect" class="pane-view">
       <div class="pane-header center-align">
         <h2>Selecione seu Launcher</h2>
         <p class="pane-subtitle">Escolha o launcher onde o Foundry & Frontier está instalado.</p>

@@ -3,7 +3,8 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use serde::{Deserialize, Serialize};
 use directories::BaseDirs;
 
@@ -404,6 +405,247 @@ fn uuid_dummy() -> String {
     since_the_epoch.as_millis().to_string()
 }
 
+// ---------------------------------------------------------------------------
+// U1.3/U1.4 — App Self-Update structs and commands
+// ---------------------------------------------------------------------------
+
+/// Result returned to JS for the app self-update check.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AppUpdateInfo {
+    /// True if a newer version is available on GitHub Releases.
+    #[serde(rename = "updateAvailable")]
+    update_available: bool,
+    /// Local version string read from version.json, or Tauri package version.
+    #[serde(rename = "localVersion")]
+    local_version: String,
+    /// Latest GitHub release tag, e.g. "v1.0.2".
+    #[serde(rename = "latestTag")]
+    latest_tag: String,
+    /// Download URL for `foundry_frontier_sync_portable.zip` asset, if found.
+    #[serde(rename = "downloadUrl")]
+    download_url: Option<String>,
+    /// Human-readable status message for the UI.
+    message: String,
+}
+
+/// Minimal fields we care about from the GitHub Releases API response.
+#[derive(Deserialize, Debug)]
+struct GhRelease {
+    tag_name: String,
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// Reads the local app version from `version.json` next to the executable,
+/// or falls back to the Tauri package version embedded at compile time.
+fn read_local_app_version() -> String {
+    // Try version.json next to the current exe
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(dir) = exe_path.parent() {
+            let vj = dir.join("version.json");
+            if let Ok(content) = fs::read_to_string(&vj) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
+                        return ver.to_string();
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: version baked in at compile time
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Parse a semver-like tag string (e.g., "v1.0.2") into comparable tuple.
+fn parse_version_tag(tag: &str) -> (u64, u64, u64) {
+    let s = tag.trim_start_matches('v');
+    let parts: Vec<u64> = s.split('.')
+        .filter_map(|p| p.parse::<u64>().ok())
+        .collect();
+    (
+        parts.get(0).copied().unwrap_or(0),
+        parts.get(1).copied().unwrap_or(0),
+        parts.get(2).copied().unwrap_or(0),
+    )
+}
+
+/// Checks GitHub Releases API for a newer version of the updater app.
+/// Called from JS at startup before showing the launcher selection pane.
+#[tauri::command]
+fn check_app_update() -> Result<AppUpdateInfo, String> {
+    const GITHUB_API: &str =
+        "https://api.github.com/repos/moesuito/foundry-frontier-updater/releases/latest";
+    const PORTABLE_ASSET: &str = "foundry_frontier_sync_portable.zip";
+
+    let local_version = read_local_app_version();
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("foundry-frontier-sync-updater/1.0")
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let response = client
+        .get(GITHUB_API)
+        .send()
+        .map_err(|e| format!("GitHub API unreachable: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub API returned HTTP {}",
+            response.status()
+        ));
+    }
+
+    let release: GhRelease = response
+        .json()
+        .map_err(|e| format!("GitHub API JSON parse error: {}", e))?;
+
+    let latest_tag = release.tag_name.clone();
+    let local_tuple = parse_version_tag(&local_version);
+    let latest_tuple = parse_version_tag(&latest_tag);
+
+    let update_available = latest_tuple > local_tuple;
+
+    let download_url = if update_available {
+        release.assets.iter()
+            .find(|a| a.name == PORTABLE_ASSET)
+            .map(|a| a.browser_download_url.clone())
+    } else {
+        None
+    };
+
+    let message = if update_available {
+        format!(
+            "Nova versão disponível: {} (atual: {})",
+            latest_tag, local_version
+        )
+    } else {
+        format!("Aplicativo atualizado (v{}).", local_version)
+    };
+
+    Ok(AppUpdateInfo {
+        update_available,
+        local_version,
+        latest_tag,
+        download_url,
+        message,
+    })
+}
+
+/// Downloads the portable zip to a temp directory, emitting `app-update-progress` events.
+/// Returns the path to the downloaded zip file.
+#[tauri::command]
+fn download_app_update(window: tauri::Window, download_url: String) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir();
+    let zip_path = temp_dir.join(format!("ffs_self_update_{}.zip", uuid_dummy()));
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .user_agent("foundry-frontier-sync-updater/1.0")
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let mut response = client
+        .get(&download_url)
+        .send()
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Download HTTP error: {}", response.status()));
+    }
+
+    let total_size = response.content_length().unwrap_or(0);
+    let mut dest = fs::File::create(&zip_path)
+        .map_err(|e| format!("Cannot create temp file: {}", e))?;
+
+    let mut buffer = [0u8; 8192];
+    let mut downloaded: u64 = 0;
+
+    loop {
+        let n = response
+            .read(&mut buffer)
+            .map_err(|e| format!("Read error: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        dest.write_all(&buffer[..n])
+            .map_err(|e| format!("Write error: {}", e))?;
+        downloaded += n as u64;
+        if total_size > 0 {
+            let pct = (downloaded * 100) / total_size;
+            let _ = window.emit("app-update-progress", pct);
+        }
+    }
+
+    Ok(zip_path.to_string_lossy().to_string())
+}
+
+/// Launches updater-helper.exe with the required arguments, then exits the main app.
+/// The helper is expected to be in the same directory as the main executable.
+#[tauri::command]
+fn launch_updater_helper(
+    zip_path: String,
+    install_dir: String,
+    app_exe: String,
+) -> Result<(), String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Cannot get current exe: {}", e))?;
+    let exe_dir = current_exe.parent()
+        .ok_or("Cannot get exe directory")?;
+
+    let helper_exe = exe_dir.join("updater-helper.exe");
+    if !helper_exe.exists() {
+        return Err(format!(
+            "updater-helper.exe not found at: {}",
+            helper_exe.display()
+        ));
+    }
+
+    // Allow JS to pass empty strings; derive from current_exe() in that case.
+    let resolved_install_dir = if install_dir.is_empty() {
+        exe_dir.to_string_lossy().to_string()
+    } else {
+        install_dir
+    };
+    let resolved_app_exe = if app_exe.is_empty() {
+        current_exe.to_string_lossy().to_string()
+    } else {
+        app_exe
+    };
+
+    let current_pid = std::process::id();
+    let log_path = dirs_log_path();
+
+    Command::new(&helper_exe)
+        .arg("--pid").arg(current_pid.to_string())
+        .arg("--install-dir").arg(&resolved_install_dir)
+        .arg("--zip").arg(&zip_path)
+        .arg("--exe").arg(&resolved_app_exe)
+        .arg("--log").arg(&log_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch updater-helper: {}", e))?;
+
+    // Exit the current app so the helper can replace our files.
+    std::process::exit(0);
+}
+
+fn dirs_log_path() -> String {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    base.join("FoundryFrontierSync")
+        .join("logs")
+        .join("updater-helper.log")
+        .to_string_lossy()
+        .to_string()
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -412,7 +654,11 @@ fn main() {
             check_updates,
             apply_update,
             validate_installation,
-            open_folder
+            open_folder,
+            // U1.3/U1.4 — App self-update
+            check_app_update,
+            download_app_update,
+            launch_updater_helper
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

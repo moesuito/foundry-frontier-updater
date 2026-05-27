@@ -1,11 +1,11 @@
 # Foundry & Frontier Sync
 
-Cliente desktop Tauri para sincronizar instalacoes locais do modpack
-**Foundry & Frontier**. O app detecta instancias PolyMC/Prism Launcher,
+Cliente desktop Tauri para sincronizar instalações locais do modpack
+**Foundry & Frontier**. O app detecta instâncias PolyMC/Prism Launcher,
 consulta o dashboard principal, baixa patches incrementais e aplica os arquivos
 na pasta `.minecraft` do jogador.
 
-O backend e o painel admin do atualizador nao ficam mais neste repositorio.
+O backend e o painel admin do atualizador não ficam mais neste repositório.
 Eles foram integrados ao dashboard principal em:
 
 ```text
@@ -19,21 +19,29 @@ https://github.com/moesuito/modpack-dashboard
 ├── client/
 │   ├── src/               # HTML/CSS/JS da interface do jogador
 │   └── src-tauri/         # comandos nativos Rust
+│       └── src/
+│           ├── main.rs            # app principal Tauri
+│           └── bin/
+│               └── updater-helper.rs  # helper de auto-update (U1.2)
 ├── scripts/
-│   └── package-release.ps1  # empacotamento local de release
-└── foundry_frontier_sync.exe  # copia conveniente do ultimo build
+│   ├── package-release.ps1          # empacotamento local de release
+│   └── test-updater-helper.ps1      # testes do helper (U1.2/U1.4)
+├── .github/
+│   └── workflows/
+│       └── build-release.yml        # GitHub Actions CI (U1.5)
+└── foundry_frontier_sync.exe  # cópia conveniente do último build
 ```
 
 ## API Consumida
 
-O executavel usa a URL base do dashboard principal configurada em
+O executável usa a URL base do dashboard principal configurada em
 `client/src/main.js`:
 
 ```javascript
 const SERVER_URL = 'https://server-alano.polecat-atria.ts.net';
 ```
 
-Rotas publicas usadas pelo app:
+Rotas públicas usadas pelo app:
 
 ```text
 GET /api/check-updates?version=1.0.0
@@ -41,19 +49,37 @@ GET /api/latest-version
 GET /api/download/:filename
 ```
 
-No dashboard principal, essas rotas sao reescritas para `/api/updater/*`.
+No dashboard principal, essas rotas são reescritas para `/api/updater/*`.
 
-## Pre-requisitos de Build
+## Fluxo de Auto-Atualização (U1.3/U1.4)
+
+Ao iniciar, o app **bloqueia** a seleção de launcher e verifica:
+
+```text
+https://api.github.com/repos/moesuito/foundry-frontier-updater/releases/latest
+```
+
+- Se não há atualização → continua normalmente (< 1s de atraso).
+- Se há atualização → baixa `foundry_frontier_sync_portable.zip`, lança
+  `updater-helper.exe` e fecha o app principal.
+- Se GitHub estiver inacessível → aviso de 2,5s e continua (fail open).
+- Não há botão de pular atualizações do app.
+
+O `updater-helper.exe` espera o processo principal fechar, extrai o zip na
+pasta de instalação, verifica o novo executável e `version.json`, e relança
+o app. Logs ficam em `%LOCALAPPDATA%\FoundryFrontierSync\logs\updater-helper.log`.
+
+## Pré-requisitos de Build
 
 - Node.js LTS
 - Rust via rustup
 - Visual Studio Build Tools com workload **C++**
-- NSIS 3.x instalado no PATH (o Tauri v1 usa o binario `makensis`)
+- NSIS 3.x instalado no PATH (o Tauri v1 usa o binário `makensis`)
 
 ## Build do Instalador NSIS
 
 ```powershell
-# 1. Instala dependencias JS
+# 1. Instala dependências JS
 npm --prefix updaterapp/client install
 
 # 2. Compila app + gera instalador NSIS (modo currentUser, sem admin/UAC)
@@ -66,15 +92,58 @@ O instalador gerado fica em:
 updaterapp/client/src-tauri/target/release/bundle/nsis/
 ```
 
-O `installMode` esta configurado como `currentUser`, portanto:
+O `installMode` está configurado como `currentUser`, portanto:
 
-- **Nao requer elevacao de UAC/admin.**
+- **Não requer elevação de UAC/admin.**
 - Instala em `%LOCALAPPDATA%\Programs\Foundry Frontier Sync` (ou caminho
   equivalente escolhido pelo NSIS no modo currentUser).
 
+## Build do Updater Helper (U1.2)
+
+```powershell
+# Dentro de updaterapp/client/src-tauri (ou via npm script)
+cargo build --release --bin updater-helper
+```
+
+O binário ficará em:
+
+```text
+updaterapp/client/src-tauri/target/release/updater-helper.exe
+```
+
+### Uso Manual do Helper
+
+```text
+updater-helper.exe
+  --pid       <PID do processo principal>
+  --install-dir <caminho absoluto da pasta de instalação>
+  --zip       <caminho absoluto do zip portable baixado>
+  --exe       <caminho do executável a relançar>
+  [--log      <caminho para o arquivo de log>]
+```
+
+**Restrições de segurança embutidas no helper:**
+- Rejeita qualquer `install-dir` em `Z:\`.
+- Rejeita qualquer caminho com componente chamado `server`.
+- Bloqueia zip-slip/path traversal em qualquer entrada do zip.
+- Não requer privilégios de administrador.
+
+## Testes do Helper (U1.2)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-updater-helper.ps1
+```
+
+O script testa (usando apenas pastas temporárias):
+
+1. Rejeição de `Z:\` como diretório de instalação.
+2. Rejeição de caminho com componente `server`.
+3. Extração correta de zip portable válido.
+4. Bloqueio de zip-slip/path traversal.
+
 ## Empacotamento de Release Local
 
-Apos o build, rode:
+Após o build (NSIS + helper), rode:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File updaterapp/scripts/package-release.ps1
@@ -82,12 +151,12 @@ powershell -ExecutionPolicy Bypass -File updaterapp/scripts/package-release.ps1
 
 O script cria `updaterapp/release/<versao>/` contendo:
 
-| Arquivo                              | Descricao                                   |
+| Arquivo                              | Descrição                                   |
 |--------------------------------------|---------------------------------------------|
 | `foundry_frontier_sync_setup.exe`    | Instalador NSIS (currentUser, sem UAC)      |
 | `foundry_frontier_sync_portable.zip` | Zip com pasta `FoundryFrontierSync\` dentro |
-| `version.json`                       | Metadados da versao                         |
-| `SHA256SUMS.txt`                     | Hashes SHA-256 dos tres artefatos           |
+| `version.json`                       | Metadados da versão                         |
+| `SHA256SUMS.txt`                     | Hashes SHA-256 dos artefatos                |
 
 ### Estrutura do Portable Zip
 
@@ -95,6 +164,7 @@ O script cria `updaterapp/release/<versao>/` contendo:
 foundry_frontier_sync_portable.zip
 └── FoundryFrontierSync\
     ├── Foundry & Frontier Sync.exe
+    ├── updater-helper.exe
     └── version.json
 ```
 
@@ -109,19 +179,45 @@ foundry_frontier_sync_portable.zip
 }
 ```
 
-## Validacao Manual Apos Empacotar
+## GitHub Actions CI (U1.5)
 
-1. Execute `foundry_frontier_sync_setup.exe` e confirme que **nao aparece UAC**.
+O workflow `.github/workflows/build-release.yml` é disparado manualmente
+(`workflow_dispatch`) ou ao criar uma tag `v*.*.*`. Ele:
+
+1. Compila o app + NSIS + helper.
+2. Empacota os artefatos de release.
+3. Roda os testes do helper.
+4. Faz upload dos artefatos como Actions Artifacts (sem publicar release).
+
+**Publicação de release é responsabilidade do Orchestrator.** Após revisar
+os artefatos, use:
+
+```powershell
+gh release create v<VERSION> `
+  updaterapp/release/<VERSION>/foundry_frontier_sync_setup.exe `
+  updaterapp/release/<VERSION>/foundry_frontier_sync_portable.zip `
+  updaterapp/release/<VERSION>/version.json `
+  updaterapp/release/<VERSION>/SHA256SUMS.txt `
+  --title "Foundry & Frontier Sync v<VERSION>" `
+  --notes "Changelog aqui."
+```
+
+## Validação Manual Após Empacotar
+
+1. Execute `foundry_frontier_sync_setup.exe` e confirme que **não aparece UAC**.
 2. Confirme que o app foi instalado em `%LOCALAPPDATA%\Programs\` (ou similar).
-3. Extraia `foundry_frontier_sync_portable.zip` e confirme a pasta
-   `FoundryFrontierSync\` dentro.
+3. Extraia `foundry_frontier_sync_portable.zip` e confirme:
+   - `FoundryFrontierSync\Foundry & Frontier Sync.exe`
+   - `FoundryFrontierSync\updater-helper.exe`
+   - `FoundryFrontierSync\version.json`
 4. Abra o app e confirme que ele conecta em:
    `https://server-alano.polecat-atria.ts.net`
-5. Confirme que nenhum arquivo foi escrito em `Z:\` ou em pasta `server\`.
+5. Confirme tela de verificação de update ao iniciar (U1.4).
+6. Confirme que nenhum arquivo foi escrito em `Z:\` ou em pasta `server\`.
 
-## Copia de Conveniencia
+## Cópia de Conveniência
 
-Para atualizar o executavel na raiz do repo apos um build:
+Para atualizar o executável na raiz do repo após um build:
 
 ```powershell
 Copy-Item -LiteralPath "updaterapp\client\src-tauri\target\release\Foundry & Frontier Sync.exe" `
@@ -130,7 +226,7 @@ Copy-Item -LiteralPath "updaterapp\client\src-tauri\target\release\Foundry & Fro
 
 ## Limpeza Local
 
-Estas pastas sao geradas e podem ser removidas sem perder codigo:
+Estas pastas são geradas e podem ser removidas sem perder código:
 
 ```text
 updaterapp/client/node_modules/

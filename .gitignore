@@ -5,6 +5,9 @@ client/node_modules/
 client/src-tauri/target/
 client/src-tauri/WixTools/
 
+# Release artifacts gerados (nao commitar)
+release/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
