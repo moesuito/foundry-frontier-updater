@@ -52,8 +52,8 @@ jobs:
         run: npm --prefix client run tauri build -- --bundles nsis
         working-directory: updaterapp
 
-      - name: Build updater-helper binary
-        run: cargo build --release --bin updater-helper
+      - name: Build sync-runner binary
+        run: cargo build --release --bin sync-runner
         working-directory: updaterapp/client/src-tauri
 
       - name: Package release artifacts
@@ -85,7 +85,7 @@ jobs:
         # Runs tests against the just-built helper binary.
         # Requires NSIS build to have completed so the helper binary exists.
         run: |
-          powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-updater-helper.ps1
+          powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-sync-runner.ps1
         shell: pwsh
 
 # ---------------------------------------------------------------------------

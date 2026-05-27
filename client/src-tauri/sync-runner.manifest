@@ -3,13 +3,12 @@
   <assemblyIdentity
     version="1.0.0.0"
     processorArchitecture="*"
-    name="FoundryFrontierSync.UpdaterHelper"
+    name="FoundryFrontierSync.SyncRunner"
     type="win32"
   />
-  <description>Foundry and Frontier Sync - App Update Helper</description>
+  <description>Foundry and Frontier Sync - Sync Runner Helper</description>
   <!-- asInvoker: runs at the same privilege level as the parent process.
-       This DISABLES Windows Installer Detection heuristic which would otherwise
-       auto-elevate any executable with "update" or "install" in its name. -->
+       This DISABLES Windows Installer Detection heuristic. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

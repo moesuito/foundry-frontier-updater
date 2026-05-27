@@ -191,7 +191,7 @@ async function runSelfUpdateCheck() {
     // install_dir = directory of the current exe.
     // These are passed through Rust, so we fetch them via a dedicated invoke
     // or we pass empty strings and let Rust figure it out from current_exe().
-    await invoke('launch_updater_helper', {
+    await invoke('launch_sync_runner', {
       zipPath,
       installDir: '',   // Rust fills in from current_exe().parent()
       appExe: '',       // Rust fills in from current_exe()

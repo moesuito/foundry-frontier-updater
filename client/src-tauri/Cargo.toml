@@ -1,6 +1,6 @@
 [package]
 name = "foundry_frontier_sync"
-version = "1.0.0"
+version = "1.0.1"
 description = "Atualizador oficial de modpacks Foundry & Frontier"
 authors = ["you"]
 edition = "2021"
@@ -10,10 +10,10 @@ edition = "2021"
 name = "foundry_frontier_sync"
 path = "src/main.rs"
 
-# Standalone updater helper — runs without Tauri, no windows_subsystem override
+# Standalone sync runner helper — runs without Tauri, no windows_subsystem override
 [[bin]]
-name = "updater-helper"
-path = "src/bin/updater-helper.rs"
+name = "sync-runner"
+path = "src/bin/sync-runner.rs"
 
 [build-dependencies]
 tauri-build = { version = "1", features = [] }

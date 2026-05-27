@@ -597,10 +597,10 @@ fn download_app_update(window: tauri::Window, download_url: String) -> Result<St
     Ok(zip_path.to_string_lossy().to_string())
 }
 
-/// Launches updater-helper.exe with the required arguments, then exits the main app.
-/// The helper is expected to be in the same directory as the main executable.
+/// Launches sync-runner.exe with the required arguments, then exits the main app.
+/// The runner helper is expected to be in the same directory as the main executable.
 #[tauri::command]
-fn launch_updater_helper(
+fn launch_sync_runner(
     zip_path: String,
     install_dir: String,
     app_exe: String,
@@ -610,11 +610,11 @@ fn launch_updater_helper(
     let exe_dir = current_exe.parent()
         .ok_or("Cannot get exe directory")?;
 
-    let helper_exe = exe_dir.join("updater-helper.exe");
-    if !helper_exe.exists() {
+    let runner_exe = exe_dir.join("sync-runner.exe");
+    if !runner_exe.exists() {
         return Err(format!(
-            "updater-helper.exe not found at: {}",
-            helper_exe.display()
+            "sync-runner.exe not found at: {}",
+            runner_exe.display()
         ));
     }
 
@@ -633,16 +633,16 @@ fn launch_updater_helper(
     let current_pid = std::process::id();
     let log_path = dirs_log_path();
 
-    Command::new(&helper_exe)
+    Command::new(&runner_exe)
         .arg("--pid").arg(current_pid.to_string())
         .arg("--install-dir").arg(&resolved_install_dir)
         .arg("--zip").arg(&zip_path)
         .arg("--exe").arg(&resolved_app_exe)
         .arg("--log").arg(&log_path)
         .spawn()
-        .map_err(|e| format!("Failed to launch updater-helper: {}", e))?;
+        .map_err(|e| format!("Failed to launch sync-runner: {}", e))?;
 
-    // Exit the current app so the helper can replace our files.
+    // Exit the current app so the runner can replace our files.
     std::process::exit(0);
 }
 
@@ -652,7 +652,7 @@ fn dirs_log_path() -> String {
         .unwrap_or_else(|_| std::env::temp_dir());
     base.join("FoundryFrontierSync")
         .join("logs")
-        .join("updater-helper.log")
+        .join("sync-runner.log")
         .to_string_lossy()
         .to_string()
 }
@@ -669,7 +669,7 @@ fn main() {
             // U1.3/U1.4 — App self-update
             check_app_update,
             download_app_update,
-            launch_updater_helper
+            launch_sync_runner
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

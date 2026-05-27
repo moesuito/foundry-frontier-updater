@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Testa a seguranca e funcionalidade basica do updater-helper.exe.
+    Testa a seguranca e funcionalidade basica do sync-runner.exe.
 
 .DESCRIPTION
     Este script:
-      1. Localiza o updater-helper.exe compilado.
+      1. Localiza o sync-runner.exe compilado.
       2. Testa rejeicao de caminho de instalacao perigoso (Z:\, server\).
       3. Cria um portable zip de teste em pasta temporaria.
       4. Testa extracao em diretorio temporario de instalacao.
@@ -17,7 +17,7 @@
 
 .NOTES
     Execute a partir da raiz do repositorio:
-      powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-updater-helper.ps1
+      powershell -ExecutionPolicy Bypass -File updaterapp/scripts/test-sync-runner.ps1
 #>
 
 Set-StrictMode -Version Latest
@@ -76,7 +76,7 @@ function Invoke-Helper {
 # ---------------------------------------------------------------------------
 $RepoRoot  = (Resolve-Path "$PSScriptRoot\..\.." ).Path
 $TargetDir = Join-Path $RepoRoot 'updaterapp\client\src-tauri\target\release'
-$HelperExe = Join-Path $TargetDir 'updater-helper.exe'
+$HelperExe = Join-Path $TargetDir 'sync-runner.exe'
 
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Yellow
@@ -85,12 +85,12 @@ Write-Host "=============================================" -ForegroundColor Yell
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath $HelperExe)) {
-    Write-Host "[SKIP] updater-helper.exe not found at:" -ForegroundColor Yellow
+    Write-Host "[SKIP] sync-runner.exe not found at:" -ForegroundColor Yellow
     Write-Host "       $HelperExe"
     Write-Host ""
     Write-Host "Build first with:"
     Write-Host "  cd updaterapp\client"
-    Write-Host "  cargo build --release --bin updater-helper"
+    Write-Host "  cargo build --release --bin sync-runner"
     Write-Host ""
     Write-Host "Skipping runtime tests. Exiting with code 0 (pre-build state)."
     exit 0
@@ -128,7 +128,7 @@ function New-ValidPortableZip {
     New-Item -ItemType Directory -Force -Path $AppFolder | Out-Null
     Set-Content -Path (Join-Path $AppFolder 'Foundry & Frontier Sync.exe') -Value 'FAKE_EXE_DATA' -Encoding UTF8
     Set-Content -Path (Join-Path $AppFolder 'version.json') -Value '{"version":"9.9.9"}' -Encoding UTF8
-    Set-Content -Path (Join-Path $AppFolder 'updater-helper.exe') -Value 'FAKE_HELPER_DATA' -Encoding UTF8
+    Set-Content -Path (Join-Path $AppFolder 'sync-runner.exe') -Value 'FAKE_RUNNER_DATA' -Encoding UTF8
 
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $StagingDir,

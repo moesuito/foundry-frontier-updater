@@ -1,4 +1,4 @@
-// updater-helper.rs
+// sync-runner.rs
 // Foundry & Frontier Sync -- app self-update helper
 //
 // This binary is launched by the main app before it exits. It:
@@ -8,10 +8,10 @@
 //   4. Extracts the downloaded portable zip into the install directory.
 //   5. Verifies the new executable and version.json exist.
 //   6. Relaunches the app.
-//   7. Logs all steps to %LOCALAPPDATA%\FoundryFrontierSync\logs\updater-helper.log
+//   7. Logs all steps to %LOCALAPPDATA%\FoundryFrontierSync\logs\sync-runner.log
 //
 // Usage:
-//   updater-helper.exe --pid <PID> --install-dir <DIR> --zip <PATH> --exe <EXE> [--log <PATH>]
+//   sync-runner.exe --pid <PID> --install-dir <DIR> --zip <PATH> --exe <EXE> [--log <PATH>]
 //
 // NOTE: This is a console subsystem binary (no windows_subsystem = "windows").
 // It must attach to a console so callers can capture the exit code.
@@ -29,7 +29,7 @@ fn main() {
     let parsed = match parse_args(&args) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("updater-helper: argument error: {}", e);
+            eprintln!("sync-runner: argument error: {}", e);
             std::process::exit(2);
         }
     };
@@ -45,7 +45,7 @@ fn main() {
     }
 
     let mut logger = Logger::new(&log_path);
-    logger.log("=== Foundry & Frontier Sync — updater-helper started ===");
+    logger.log("=== Foundry & Frontier Sync — sync-runner started ===");
     logger.log(&format!("  PID to wait for : {}", parsed.target_pid));
     logger.log(&format!("  Install dir     : {}", parsed.install_dir.display()));
     logger.log(&format!("  Zip path        : {}", parsed.zip_path.display()));
@@ -96,7 +96,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    logger.log("[DONE] updater-helper finished successfully.");
+    logger.log("[DONE] sync-runner finished successfully.");
 }
 
 // ---------------------------------------------------------------------------
@@ -535,5 +535,5 @@ fn default_log_path() -> PathBuf {
     let base = env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::temp_dir());
-    base.join("FoundryFrontierSync").join("logs").join("updater-helper.log")
+    base.join("FoundryFrontierSync").join("logs").join("sync-runner.log")
 }

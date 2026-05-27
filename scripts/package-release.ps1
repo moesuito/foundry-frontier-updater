@@ -65,8 +65,12 @@ if (-not (Test-Path $NsisDir)) {
     exit 1
 }
 
-$SetupExe = Get-ChildItem -Path $NsisDir -Filter '*_setup.exe' -ErrorAction SilentlyContinue |
+$SetupExe = Get-ChildItem -Path $NsisDir -Filter "*$Version*.exe" -ErrorAction SilentlyContinue |
             Select-Object -First 1
+if (-not $SetupExe) {
+    $SetupExe = Get-ChildItem -Path $NsisDir -Filter '*_setup.exe' -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+}
 if (-not $SetupExe) {
     # Tauri v1 pode nomear sem sufixo _setup em versoes antigas
     $SetupExe = Get-ChildItem -Path $NsisDir -Filter '*.exe' -ErrorAction SilentlyContinue |
@@ -118,14 +122,14 @@ New-Item -ItemType Directory -Force -Path $FolderInZip | Out-Null
 Copy-Item -LiteralPath $AppExe -Destination (Join-Path $FolderInZip 'Foundry & Frontier Sync.exe') -Force
 Copy-Item -LiteralPath $VersionJsonPath -Destination (Join-Path $FolderInZip 'version.json') -Force
 
-# Include updater-helper.exe if it was compiled (U1.2)
-$HelperExe = Join-Path $TargetDir 'updater-helper.exe'
+# Include sync-runner.exe if it was compiled (U1.2)
+$HelperExe = Join-Path $TargetDir 'sync-runner.exe'
 if (Test-Path -LiteralPath $HelperExe) {
-    Copy-Item -LiteralPath $HelperExe -Destination (Join-Path $FolderInZip 'updater-helper.exe') -Force
-    Write-Host "  Incluido updater-helper.exe no portable zip."
+    Copy-Item -LiteralPath $HelperExe -Destination (Join-Path $FolderInZip 'sync-runner.exe') -Force
+    Write-Host "  Incluido sync-runner.exe no portable zip."
 } else {
-    Write-Warning "updater-helper.exe nao encontrado em $HelperExe - portable zip sera criado sem ele."
-    Write-Warning "Execute 'cargo build --release --bin updater-helper' para compilar o helper."
+    Write-Warning "sync-runner.exe nao encontrado em $HelperExe - portable zip sera criado sem ele."
+    Write-Warning "Execute 'cargo build --release --bin sync-runner' para compilar o helper."
 }
 
 $PortableZipName = 'foundry_frontier_sync_portable.zip'
