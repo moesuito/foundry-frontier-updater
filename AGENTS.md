@@ -22,7 +22,9 @@ Arquivos que pertencem a este repo:
 ├── client/                    # Codigo-fonte do app Tauri
 │   ├── src/                   # UI HTML/CSS/JS do jogador
 │   └── src-tauri/             # Backend Rust nativo
-├── foundry_frontier_sync.exe  # Build distribuivel atual
+├── scripts/
+│   └── package-release.ps1    # Empacotamento local de release
+├── foundry_frontier_sync.exe  # Copia conveniente do ultimo build
 ├── README.md
 └── AGENTS.md
 ```
@@ -57,16 +59,33 @@ O dashboard tambem expoe rewrites compativeis para o executavel:
 4. Nao escrever em `Z:\` nem tocar na producao do servidor Minecraft a partir
    deste repo.
 5. O jogador sempre escolhe o launcher manualmente ao abrir o app.
-6. Atualizacoes nunca sao aplicadas silenciosamente; o jogador precisa clicar
-   para baixar e atualizar.
+6. **Atualizacoes de modpack nunca sao aplicadas silenciosamente.** O jogador
+   precisa clicar explicitamente para baixar e aplicar patches dentro da
+   instancia Minecraft. Nenhuma logica de auto-apply deve ser adicionada sem
+   aprovacao explicita do Orchestrator.
+7. **Atualizacoes do proprio aplicativo (self-update) podem ser obrigatorias**
+   em uma fase futura (U1.3/U1.4), usando GitHub Releases e um helper externo
+   (`updater-helper.exe`). Quando implementado, o app bloqueara a tela de
+   modpack enquanto a atualizacao obrigatoria do proprio app for aplicada.
+   Nao confundir self-update do app com patches do modpack: sao fluxos
+   completamente separados.
 
 ## Build
 
 ```powershell
+# Instala dependencias
 npm --prefix client install
-npm --prefix client run tauri build
+
+# Compila app + gera instalador NSIS (currentUser, sem admin/UAC)
+npm --prefix client run tauri build -- --bundles nsis
+
+# Empacota artefatos de release (setup, portable zip, version.json, SHA256SUMS)
+powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
+
+# Copia de conveniencia do executavel para a raiz do repo
 Copy-Item -LiteralPath "client\src-tauri\target\release\Foundry & Frontier Sync.exe" -Destination .\foundry_frontier_sync.exe -Force
 ```
 
 O executavel deve apontar para a URL base do dashboard principal, sem porta
-legada `10000`.
+legada `10000`. O `installMode` NSIS esta configurado como `currentUser`:
+nao requer elevacao de UAC e instala em `%LOCALAPPDATA%\Programs\`.

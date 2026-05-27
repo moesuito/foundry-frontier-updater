@@ -31,8 +31,8 @@
       "csp": null
     },
     "bundle": {
-      "active": false,
-      "targets": [],
+      "active": true,
+      "targets": ["nsis", "app"],
       "identifier": "com.foundryfrontier.sync",
       "icon": [
         "icons/32x32.png",
@@ -40,7 +40,17 @@
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
-      ]
+      ],
+      "windows": {
+        "nsis": {
+          "installMode": "currentUser",
+          "languages": ["SimpChinese"],
+          "displayLanguageSelector": false
+        }
+      },
+      "longDescription": "Atualizador incremental do modpack Foundry & Frontier. Instala sem privilegios de administrador.",
+      "shortDescription": "Atualizador do modpack Foundry & Frontier",
+      "copyright": "moesuito"
     }
   }
 }
