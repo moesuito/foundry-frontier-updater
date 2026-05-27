@@ -12,9 +12,7 @@
 //
 // Usage:
 //   sync-runner.exe --pid <PID> --install-dir <DIR> --zip <PATH> --exe <EXE> [--log <PATH>]
-//
-// NOTE: This is a console subsystem binary (no windows_subsystem = "windows").
-// It must attach to a console so callers can capture the exit code.
+#![windows_subsystem = "windows"]
 
 use std::env;
 use std::fs;
