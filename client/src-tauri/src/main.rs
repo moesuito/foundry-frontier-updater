@@ -495,12 +495,23 @@ fn check_app_update() -> Result<AppUpdateInfo, String> {
         .send()
         .map_err(|e| format!("GitHub API unreachable: {}", e))?;
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "GitHub API returned HTTP {}",
-            response.status()
-        ));
+    let status = response.status();
+
+    // 404 = repositório sem nenhuma release publicada ainda → sem atualização
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(AppUpdateInfo {
+            update_available: false,
+            local_version: local_version.clone(),
+            latest_tag: local_version.clone(),
+            download_url: None,
+            message: format!("Aplicativo atualizado (v{}).", local_version),
+        });
     }
+
+    if !status.is_success() {
+        return Err(format!("GitHub API returned HTTP {}", status));
+    }
+
 
     let release: GhRelease = response
         .json()
