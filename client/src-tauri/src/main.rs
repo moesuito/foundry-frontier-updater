@@ -658,6 +658,20 @@ fn dirs_log_path() -> String {
 }
 
 fn main() {
+    // Clean up any left-over .exe.old files from self-updates
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|ext| ext == "old").unwrap_or(false) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             detect_instances,

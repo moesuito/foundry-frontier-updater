@@ -330,7 +330,46 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            if let Err(e) = fs::copy(&src_path, &dst_path) {
+                // If it fails on Windows because the file is locked/running, skip it (non-fatal for helper exe)
+                let is_helper = src_path.file_name()
+                    .map(|name| {
+                        let lower = name.to_string_lossy().to_lowercase();
+                        lower == "sync-runner.exe" || lower == "updater-helper.exe"
+                    })
+                    .unwrap_or(false);
+                if !is_helper {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn safe_clean_install_dir(dir: &Path, logger: &mut Logger) -> io::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = safe_clean_install_dir(&path, logger);
+            let _ = fs::remove_dir(&path); // Might fail if it contains the running exe
+        } else {
+            let is_helper = path.file_name()
+                .map(|name| {
+                    let lower = name.to_string_lossy().to_lowercase();
+                    lower == "sync-runner.exe" || lower == "updater-helper.exe" || lower.ends_with(".old")
+                })
+                .unwrap_or(false);
+            if is_helper {
+                continue;
+            }
+            if let Err(e) = fs::remove_file(&path) {
+                logger.log(&format!("[WARN] Restore failed to remove file {}: {}", path.display(), e));
+            }
         }
     }
     Ok(())
@@ -338,9 +377,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn restore_backup(backup_dir: &Path, install_dir: &Path, logger: &mut Logger) -> io::Result<()> {
     logger.log(&format!("[RESTORE] Restoring from backup: {}", backup_dir.display()));
-    // Remove current (possibly partially updated) install dir
     if install_dir.exists() {
-        fs::remove_dir_all(install_dir)?;
+        if let Err(e) = safe_clean_install_dir(install_dir, logger) {
+            logger.log(&format!("[WARN] Clean install dir error: {}", e));
+        }
     }
     copy_dir_recursive(backup_dir, install_dir)?;
     logger.log("[RESTORE] Restore complete.");
@@ -410,6 +450,27 @@ fn extract_portable_zip(zip_path: &Path, install_dir: &Path, logger: &mut Logger
             fs::create_dir_all(&outpath)
                 .map_err(|e| format!("Cannot create dir {}: {}", outpath.display(), e))?;
         } else {
+            #[cfg(target_os = "windows")]
+            {
+                if outpath.exists() {
+                    let is_helper = outpath.file_name()
+                        .map(|name| {
+                            let lower = name.to_string_lossy().to_lowercase();
+                            lower == "sync-runner.exe" || lower == "updater-helper.exe"
+                        })
+                        .unwrap_or(false);
+                    if is_helper {
+                        let old_path = outpath.with_extension("exe.old");
+                        let _ = fs::remove_file(&old_path);
+                        if let Err(e) = fs::rename(&outpath, &old_path) {
+                            logger.log(&format!("[WARN] Failed to rename helper '{}' to '{}': {}", outpath.display(), old_path.display(), e));
+                        } else {
+                            logger.log(&format!("[OK] Renamed running helper to '{}' to allow overwrite", old_path.display()));
+                        }
+                    }
+                }
+            }
+
             let mut outfile = fs::File::create(&outpath)
                 .map_err(|e| format!("Cannot create file {}: {}", outpath.display(), e))?;
             io::copy(&mut entry, &mut outfile)
