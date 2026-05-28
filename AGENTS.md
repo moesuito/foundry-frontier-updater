@@ -13,6 +13,12 @@ Repositorio do dashboard principal:
 https://github.com/moesuito/modpack-dashboard
 ```
 
+Repositorio do modpack (onde ficam as releases dos patches):
+
+```text
+https://github.com/moesuito/foundry-frontier-modpack
+```
+
 ## Escopo Atual
 
 Arquivos que pertencem a este repo:
@@ -36,19 +42,14 @@ Nao pertence mais a este repo:
 - `updates.json` e uploads de patches;
 - porta `10000`.
 
-Essas responsabilidades vivem no dashboard principal:
+Essas responsabilidades agora vivem no GitHub Releases:
 
-- `GET /api/updater/latest-version`
-- `GET /api/updater/check-updates?version=...`
-- `GET /api/updater/download/:filename`
-- `GET|POST /api/admin/updater/updates`
-- `DELETE /api/admin/updater/updates/:id`
+- Consulta de atualizações do modpack (patches):
+  `GET https://api.github.com/repos/moesuito/foundry-frontier-modpack/releases`
+- Download do arquivo incremental: `update-vX.Y.Z.zip` obtido como asset da release correspondente.
+- Arquivos a serem removidos durante a atualização: descritos no corpo da release sob seções como `### Removed Files` ou `### Arquivos Removidos`.
 
-O dashboard tambem expoe rewrites compativeis para o executavel:
-
-- `/api/latest-version`
-- `/api/check-updates`
-- `/api/download/:filename`
+O dashboard principal do Minecraft/Express não gerencia mais o download nem metadados dos patches incrementais do modpack.
 
 ## Regras
 
@@ -86,6 +87,5 @@ powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
 Copy-Item -LiteralPath "client\src-tauri\target\release\Foundry & Frontier Sync.exe" -Destination .\foundry_frontier_sync.exe -Force
 ```
 
-O executavel deve apontar para a URL base do dashboard principal, sem porta
-legada `10000`. O `installMode` NSIS esta configurado como `currentUser`:
+O executavel agora aponta diretamente para as APIs do GitHub (tanto para auto-update do app quanto para os patches do modpack), nao dependendo de servidores privados ou dashboards Minecraft para estas tarefas. O `installMode` NSIS esta configurado como `currentUser`:
 nao requer elevacao de UAC e instala em `%LOCALAPPDATA%\Programs\`.
