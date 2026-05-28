@@ -21,7 +21,6 @@ const btnWinClose = document.getElementById('btnWinClose');
 
 // Painel Setup
 const paneSetup = document.getElementById('paneSetup');
-const SERVER_URL = 'https://server-alano.polecat-atria.ts.net';
 const instancesStatus = document.getElementById('instancesStatus');
 const instancesEmpty = document.getElementById('instancesEmpty');
 const instancesList = document.getElementById('instancesList');
@@ -381,7 +380,6 @@ async function checkUpdates() {
 
   try {
     const data = await invoke('check_updates', {
-      serverUrl: SERVER_URL,
       currentVersion: selectedInstance.version
     });
 

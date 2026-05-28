@@ -61,6 +61,54 @@ struct VersionJson {
     loader_version: String,
 }
 
+// --- GitHub Releases Structs ---
+
+#[derive(Deserialize, Debug, Clone)]
+struct GhRelease {
+    tag_name: String,
+    body: Option<String>,
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+// --- Funções Auxiliares de Parsing ---
+
+fn parse_removed_files(body: &str) -> Vec<String> {
+    let mut removed = Vec::new();
+    let mut in_section = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let lower = trimmed.to_lowercase();
+            if lower.contains("removed file")
+                || lower.contains("arquivos removidos")
+                || lower.contains("arquivo removido")
+                || lower.contains("removed_files")
+            {
+                in_section = true;
+            } else {
+                in_section = false;
+            }
+            continue;
+        }
+        if in_section {
+            if trimmed.starts_with('-') || trimmed.starts_with('*') {
+                let file_path = trimmed[1..].trim().trim_matches('`').trim().to_string();
+                if !file_path.is_empty() {
+                    removed.push(file_path);
+                }
+            }
+        }
+    }
+    removed
+}
+
+
 // --- Funções Auxiliares (Bootstrap e Varredura) ---
 
 fn detect_initial_mods(mods_dir: &Path) -> bool {
@@ -247,25 +295,79 @@ fn select_folder_manually() -> Result<Option<InstanceInfo>, String> {
 }
 
 #[tauri::command]
-fn check_updates(server_url: String, current_version: String) -> Result<UpdateResponse, String> {
+fn check_updates(current_version: String) -> Result<UpdateResponse, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        .user_agent("foundry-frontier-sync-updater/1.0")
         .build()
         .map_err(|e| format!("Erro ao inicializar cliente HTTP: {}", e))?;
 
-    let check_url = format!("{}/api/check-updates?version={}", server_url.trim_end_matches('/'), current_version);
+    let check_url = "https://api.github.com/repos/moesuito/foundry-frontier-modpack/releases";
     
-    let res = client.get(&check_url).send()
-        .map_err(|e| format!("Falha ao conectar com o servidor: {}", e))?;
+    let res = client.get(check_url).send()
+        .map_err(|e| format!("Falha ao conectar com o GitHub: {}", e))?;
 
     if !res.status().is_success() {
-        return Err(format!("Servidor retornou status HTTP: {}", res.status()));
+        return Err(format!("GitHub retornou status HTTP: {}", res.status()));
     }
 
-    let response_data: UpdateResponse = res.json()
-        .map_err(|e| format!("Erro ao analisar resposta do servidor: {}", e))?;
+    let releases: Vec<GhRelease> = res.json()
+        .map_err(|e| format!("Erro ao analisar resposta do GitHub: {}", e))?;
 
-    Ok(response_data)
+    let local_ver = parse_version_tag(&current_version);
+    
+    // Filtra releases que tenham versão maior que a atual e tenham o asset de update zip
+    let mut eligible_releases: Vec<((u64, u64, u64), GhRelease, GhAsset)> = Vec::new();
+    
+    for r in releases {
+        let r_ver = parse_version_tag(&r.tag_name);
+        if r_ver > local_ver {
+            // Busca o asset update-[tag].zip ou similar
+            let found_asset = r.assets.iter().find(|a| {
+                a.name.starts_with("update-") && a.name.ends_with(".zip")
+            }).cloned();
+            
+            if let Some(asset) = found_asset {
+                eligible_releases.push((r_ver, r, asset));
+            }
+        }
+    }
+
+    // Ordena do menor para o maior (ordem cronológica)
+    eligible_releases.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut updates = Vec::new();
+    let mut current_chain = current_version.trim_start_matches('v').to_string();
+
+    for (_, r, asset) in &eligible_releases {
+        let to_ver = r.tag_name.trim_start_matches('v').to_string();
+        let description = r.body.clone().unwrap_or_default();
+        let removed_files = parse_removed_files(&description);
+        
+        updates.push(UpdateItem {
+            id: r.tag_name.clone(),
+            from_version: current_chain.clone(),
+            to_version: to_ver.clone(),
+            download_url: asset.browser_download_url.clone(),
+            description,
+            removed_files,
+        });
+        
+        current_chain = to_ver;
+    }
+
+    let latest_version = if let Some(last) = eligible_releases.last() {
+        last.1.tag_name.trim_start_matches('v').to_string()
+    } else {
+        current_version.trim_start_matches('v').to_string()
+    };
+
+    Ok(UpdateResponse {
+        update_available: !updates.is_empty(),
+        current_version: current_version.trim_start_matches('v').to_string(),
+        latest_version,
+        updates,
+    })
 }
 
 #[tauri::command]
@@ -350,7 +452,9 @@ fn apply_update(
             None => continue,
         };
 
-        if (*file.name()).ends_with('/') {
+        let is_dir = file.is_dir() || file.name().ends_with('/') || file.name().ends_with('\\');
+
+        if is_dir {
             fs::create_dir_all(&outpath)
                 .map_err(|e| format!("Erro ao criar subdiretório: {}", e))?;
         } else {
@@ -428,18 +532,7 @@ struct AppUpdateInfo {
     message: String,
 }
 
-/// Minimal fields we care about from the GitHub Releases API response.
-#[derive(Deserialize, Debug)]
-struct GhRelease {
-    tag_name: String,
-    assets: Vec<GhAsset>,
-}
-
-#[derive(Deserialize, Debug)]
-struct GhAsset {
-    name: String,
-    browser_download_url: String,
-}
+// structs GhRelease/GhAsset movidas para o topo do arquivo
 
 /// Reads the local app version from `version.json` next to the executable,
 /// or falls back to the Tauri package version embedded at compile time.

@@ -34,22 +34,19 @@ https://github.com/moesuito/modpack-dashboard
 
 ## API Consumida
 
-O executável usa a URL base do dashboard principal configurada em
-`client/src/main.js`:
+O executável consome a API de Releases do GitHub diretamente:
 
-```javascript
-const SERVER_URL = 'https://server-alano.polecat-atria.ts.net';
-```
+- Para atualizações do próprio aplicativo:
+  ```text
+  GET https://api.github.com/repos/moesuito/foundry-frontier-updater/releases/latest
+  ```
 
-Rotas públicas usadas pelo app:
+- Para atualizações incrementais do modpack (patches):
+  ```text
+  GET https://api.github.com/repos/moesuito/foundry-frontier-modpack/releases
+  ```
 
-```text
-GET /api/check-updates?version=1.0.0
-GET /api/latest-version
-GET /api/download/:filename
-```
-
-No dashboard principal, essas rotas são reescritas para `/api/updater/*`.
+Os patches são identificados por arquivos de asset do tipo `update-vX.Y.Z.zip` ou `update-tag.zip`. Arquivos obsoletos a serem removidos são listados na descrição (body) da release em seções como `### Removed Files` ou `### Arquivos Removidos`.
 
 ## Fluxo de Auto-Atualização (U1.3/U1.4)
 
@@ -210,8 +207,7 @@ gh release create v<VERSION> `
    - `FoundryFrontierSync\Foundry & Frontier Sync.exe`
    - `FoundryFrontierSync\updater-helper.exe`
    - `FoundryFrontierSync\version.json`
-4. Abra o app e confirme que ele conecta em:
-   `https://server-alano.polecat-atria.ts.net`
+4. Abra o app e confirme que ele busca atualizações do modpack do GitHub Releases.
 5. Confirme tela de verificação de update ao iniciar (U1.4).
 6. Confirme que nenhum arquivo foi escrito em `Z:\` ou em pasta `server\`.
 
