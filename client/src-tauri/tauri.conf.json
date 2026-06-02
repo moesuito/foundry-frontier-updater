@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "Foundry & Frontier Sync",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "tauri": {
     "allowlist": {
@@ -15,16 +15,25 @@
       "shell": {
         "all": false,
         "open": true
+      },
+      "notification": {
+        "all": true
       }
+    },
+    "systemTray": {
+      "iconPath": "icons/icon.ico",
+      "iconAsTemplate": false
     },
     "windows": [
       {
+        "label": "main",
         "title": "Foundry & Frontier Sync",
         "width": 550,
         "height": 400,
         "resizable": false,
         "decorations": true,
-        "transparent": false
+        "transparent": false,
+        "visible": false
       }
     ],
     "security": {
@@ -45,7 +54,8 @@
         "nsis": {
           "installMode": "currentUser",
           "languages": ["PortugueseBR"],
-          "displayLanguageSelector": false
+          "displayLanguageSelector": false,
+          "template": "custom-installer.nsi"
         }
       },
       "longDescription": "Atualizador incremental do modpack Foundry & Frontier. Instala sem privilegios de administrador.",

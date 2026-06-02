@@ -89,7 +89,7 @@ fn main() {
 
     // --- Step 6: Relaunch ---
     logger.log(&format!("[LAUNCH] Relaunching: {}", parsed.app_exe.display()));
-    if let Err(e) = relaunch_app(&parsed.app_exe, &mut logger) {
+    if let Err(e) = relaunch_app(&parsed.app_exe, &parsed.relaunch_args, &mut logger) {
         logger.log(&format!("[ERROR] Relaunch failed: {}", e));
         std::process::exit(1);
     }
@@ -107,6 +107,7 @@ struct ParsedArgs {
     zip_path: PathBuf,
     app_exe: PathBuf,
     log_path: Option<PathBuf>,
+    relaunch_args: Option<String>,
 }
 
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
@@ -115,6 +116,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut zip_path: Option<PathBuf> = None;
     let mut app_exe: Option<PathBuf> = None;
     let mut log_path: Option<PathBuf> = None;
+    let mut relaunch_args: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -140,6 +142,10 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 i += 1;
                 log_path = Some(PathBuf::from(args.get(i).ok_or("--log requires a value")?));
             }
+            "--relaunch-args" => {
+                i += 1;
+                relaunch_args = Some(args.get(i).ok_or("--relaunch-args requires a value")?.clone());
+            }
             other => {
                 return Err(format!("Unknown argument: {}", other));
             }
@@ -153,6 +159,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         zip_path: zip_path.ok_or("--zip is required")?,
         app_exe: app_exe.ok_or("--exe is required")?,
         log_path,
+        relaunch_args,
     })
 }
 
@@ -526,7 +533,7 @@ fn verify_update(app_exe: &Path, install_dir: &Path, logger: &mut Logger) -> Res
 // Relaunch
 // ---------------------------------------------------------------------------
 
-fn relaunch_app(app_exe: &Path, logger: &mut Logger) -> Result<(), String> {
+fn relaunch_app(app_exe: &Path, relaunch_args: &Option<String>, logger: &mut Logger) -> Result<(), String> {
     // Try the exe as given; if not found, look in parent directory
     let resolved_exe = if app_exe.exists() {
         app_exe.to_path_buf()
@@ -544,8 +551,15 @@ fn relaunch_app(app_exe: &Path, logger: &mut Logger) -> Result<(), String> {
 
     logger.log(&format!("[LAUNCH] Starting: {}", resolved_exe.display()));
 
-    Command::new(&resolved_exe)
-        .spawn()
+    let mut cmd = Command::new(&resolved_exe);
+    cmd.arg("--after-update");
+    if let Some(ref args_str) = relaunch_args {
+        for arg in args_str.split_whitespace() {
+            cmd.arg(arg);
+        }
+    }
+
+    cmd.spawn()
         .map_err(|e| format!("Failed to launch '{}': {}", resolved_exe.display(), e))?;
 
     Ok(())

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 use directories::BaseDirs;
+use tauri::{SystemTray, SystemTrayMenu, CustomMenuItem, SystemTrayEvent, Manager};
 
 // --- Estruturas de Dados serializáveis para o Tauri ---
 
@@ -694,6 +695,7 @@ fn download_app_update(window: tauri::Window, download_url: String) -> Result<St
 /// The runner helper is expected to be in the same directory as the main executable.
 #[tauri::command]
 fn launch_sync_runner(
+    app_handle: tauri::AppHandle,
     zip_path: String,
     install_dir: String,
     app_exe: String,
@@ -726,17 +728,167 @@ fn launch_sync_runner(
     let current_pid = std::process::id();
     let log_path = dirs_log_path();
 
-    Command::new(&runner_exe)
-        .arg("--pid").arg(current_pid.to_string())
+    // Se a janela principal não estiver visível (rodando em background),
+    // diz ao helper para relançar o aplicativo com as flags de background.
+    let mut cmd = Command::new(&runner_exe);
+    cmd.arg("--pid").arg(current_pid.to_string())
         .arg("--install-dir").arg(&resolved_install_dir)
         .arg("--zip").arg(&zip_path)
         .arg("--exe").arg(&resolved_app_exe)
-        .arg("--log").arg(&log_path)
-        .spawn()
+        .arg("--log").arg(&log_path);
+
+    let is_visible = if let Some(window) = app_handle.get_window("main") {
+        window.is_visible().unwrap_or(true)
+    } else {
+        true
+    };
+
+    if !is_visible {
+        cmd.arg("--relaunch-args").arg("--background --tray");
+    }
+
+    cmd.spawn()
         .map_err(|e| format!("Failed to launch sync-runner: {}", e))?;
 
     // Exit the current app so the runner can replace our files.
     std::process::exit(0);
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AppSettings {
+    #[serde(rename = "autoStart")]
+    auto_start: bool,
+}
+
+fn get_settings_path() -> PathBuf {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    base.join("FoundryFrontierSync").join("settings.json")
+}
+
+fn load_settings() -> AppSettings {
+    let path = get_settings_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+                return settings;
+            }
+        }
+    }
+    AppSettings { auto_start: true }
+}
+
+fn save_settings(settings: &AppSettings) -> Result<(), String> {
+    let path = get_settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn enable_startup(enable: bool) -> Result<(), String> {
+    let appdata = std::env::var("APPDATA").map_err(|e| e.to_string())?;
+    let startup_lnk_path = Path::new(&appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup")
+        .join("FoundryFrontierSync.lnk");
+
+    if enable {
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_path = current_exe.to_string_lossy().to_string();
+        let exe_dir = current_exe.parent().ok_or("No parent directory")?.to_string_lossy().to_string();
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+            let ps_script = format!(
+                "$WshShell = New-Object -ComObject WScript.Shell; \
+                 $Shortcut = $WshShell.CreateShortcut('{}'); \
+                 $Shortcut.TargetPath = '{}'; \
+                 $Shortcut.Arguments = '--background --tray'; \
+                 $Shortcut.WorkingDirectory = '{}'; \
+                 $Shortcut.Save();",
+                startup_lnk_path.to_string_lossy().replace("'", "''"),
+                exe_path.replace("'", "''"),
+                exe_dir.replace("'", "''")
+            );
+
+            let output = Command::new("powershell")
+                .arg("-NoProfile")
+                .arg("-Command")
+                .arg(&ps_script)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map_err(|e| format!("Falha ao executar PowerShell: {}", e))?;
+
+            if !output.status.success() {
+                let err_msg = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Erro no PowerShell ao criar atalho: {}", err_msg));
+            }
+        }
+    } else {
+        if startup_lnk_path.exists() {
+            std::fs::remove_file(&startup_lnk_path).map_err(|e| format!("Erro ao remover atalho: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn is_auto_start_enabled() -> Result<bool, String> {
+    let settings = load_settings();
+    Ok(settings.auto_start)
+}
+
+#[tauri::command]
+fn set_auto_start(app_handle: tauri::AppHandle, enable: bool) -> Result<(), String> {
+    let mut settings = load_settings();
+    settings.auto_start = enable;
+    save_settings(&settings)?;
+    enable_startup(enable)?;
+    
+    // Atualiza o checkmark no menu do tray
+    let tray_handle = app_handle.tray_handle();
+    let item = tray_handle.get_item("autostart");
+    let _ = item.set_selected(enable);
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn is_minecraft_running() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        if let Ok(output) = Command::new("cmd")
+            .arg("/c")
+            .arg("tasklist /FI \"IMAGENAME eq javaw.exe\" /NH")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return stdout.contains("javaw.exe");
+        }
+    }
+    false
+}
+
+#[tauri::command]
+fn show_notification(app_handle: tauri::AppHandle, title: String, body: String) {
+    let identifier = app_handle.config().tauri.bundle.identifier.clone();
+    let _ = tauri::api::notification::Notification::new(identifier)
+        .title(title)
+        .body(body)
+        .show();
 }
 
 fn dirs_log_path() -> String {
@@ -765,7 +917,117 @@ fn main() {
         }
     }
 
+    let settings = load_settings();
+    let app_title_item = CustomMenuItem::new("title_header".to_string(), "Foundry & Frontier Sync").disabled();
+    let mut autostart_item = CustomMenuItem::new("autostart".to_string(), "Iniciar com o Windows");
+    if settings.auto_start {
+        autostart_item = autostart_item.selected();
+    }
+
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(app_title_item)
+        .add_native_item(tauri::SystemTrayMenuItem::Separator)
+        .add_item(CustomMenuItem::new("show".to_string(), "Abrir"))
+        .add_item(autostart_item)
+        .add_item(CustomMenuItem::new("quit".to_string(), "Sair"));
+    
+    let tray_icon = tauri::Icon::Raw(include_bytes!("../icons/icon.ico").to_vec());
+    let system_tray = SystemTray::new()
+        .with_icon(tray_icon)
+        .with_menu(tray_menu)
+        .with_tooltip("Foundry & Frontier Sync");
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            // Se outra instância for iniciada, exibe e foca a janela principal existente
+            if let Some(window) = app.get_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .system_tray(system_tray)
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::MenuItemClick { id, .. } => {
+                match id.as_str() {
+                    "quit" => {
+                        std::process::exit(0);
+                    }
+                    "show" => {
+                        if let Some(window) = app.get_window("main") {
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
+                        }
+                    }
+                    "autostart" => {
+                        let mut settings = load_settings();
+                        let new_val = !settings.auto_start;
+                        settings.auto_start = new_val;
+                        let _ = save_settings(&settings);
+                        let _ = enable_startup(new_val);
+
+                        // Atualiza checkmark no menu do tray
+                        let item = app.tray_handle().get_item("autostart");
+                        let _ = item.set_selected(new_val);
+
+                        // Dispara evento para o frontend atualizar o checkbox se aberto
+                        let _ = app.emit_all("auto-start-changed", new_val);
+                    }
+                    _ => {}
+                }
+            }
+            SystemTrayEvent::DoubleClick { .. } => {
+                if let Some(window) = app.get_window("main") {
+                    window.show().unwrap();
+                    window.set_focus().unwrap();
+                }
+            }
+            _ => {}
+        })
+        .on_window_event(|event| match event.event() {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                event.window().hide().unwrap();
+                api.prevent_close();
+            }
+            _ => {}
+        })
+        .setup(|app| {
+            let args: Vec<String> = std::env::args().collect();
+            
+            // 1. Verifica se foi iniciado após um update do próprio app
+            let after_update = args.iter().any(|arg| arg.to_lowercase() == "--after-update");
+            
+            let settings_path = get_settings_path();
+            let is_first_run = !settings_path.exists();
+            let mut settings = load_settings();
+            
+            if after_update {
+                // Força ativação de auto-start após update
+                settings.auto_start = true;
+                let _ = save_settings(&settings);
+                let _ = enable_startup(true);
+            } else if is_first_run {
+                // Salva a configuração padrão de auto_start = true na primeira execução
+                let _ = save_settings(&settings);
+                let _ = enable_startup(true);
+            } else {
+                // Garante que o estado do atalho condiz com as configurações
+                let _ = enable_startup(settings.auto_start);
+            }
+
+            // 2. Controla visibilidade inicial com base nas flags --background / --tray
+            let start_hidden = args.iter().any(|arg| {
+                let lower = arg.to_lowercase();
+                lower == "--background" || lower == "--tray"
+            });
+            
+            if !start_hidden {
+                if let Some(window) = app.get_window("main") {
+                    window.show().unwrap();
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             detect_instances,
             select_folder_manually,
@@ -776,7 +1038,12 @@ fn main() {
             // U1.3/U1.4 — App self-update
             check_app_update,
             download_app_update,
-            launch_sync_runner
+            launch_sync_runner,
+            // Auto-start, process and notification commands
+            is_auto_start_enabled,
+            set_auto_start,
+            is_minecraft_running,
+            show_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

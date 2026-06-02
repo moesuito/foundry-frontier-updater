@@ -70,6 +70,14 @@ O dashboard principal do Minecraft/Express não gerencia mais o download nem met
    modpack enquanto a atualizacao obrigatoria do proprio app for aplicada.
    Nao confundir self-update do app com patches do modpack: sao fluxos
    completamente separados.
+8. **Sistema de Versionamento do Aplicativo (V.X.Y.Z)**:
+   - Toda vez que for realizar uma alteração ou adicionar novos recursos, o agente **DEVE** verificar quais versões já existem localmente (na pasta `release/`) e no GitHub Releases (`https://api.github.com/repos/moesuito/foundry-frontier-updater/releases`).
+   - **NUNCA** trabalhar ou gerar pacotes em cima de uma versão que já foi lançada. Sempre abra uma nova versão apropriada incrementando o número.
+   - O esquema de incremento de versão segue a seguinte regra:
+     - `X` (Major): Grandes atualizações do sistema (ex: repaginar o aplicativo inteiro).
+     - `Y` (Minor/Medium): Médias atualizações (ex: implementação de novos recursos ou funcionalidades).
+     - `Z` (Patch): Pequenas atualizações (ex: correção de bugs ou alterações simples).
+   - Ao incrementar a versão, certifique-se de atualizar o campo `"version"` em `client/src-tauri/tauri.conf.json` e o campo `version` em `client/src-tauri/Cargo.toml` antes de rodar o build.
 
 ## Build
 

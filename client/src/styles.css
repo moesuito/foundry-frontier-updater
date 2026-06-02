@@ -875,3 +875,81 @@ label {
   flex-shrink: 0;
   color: var(--redstone);
 }
+
+/* ===========================================================================
+   Minecraft-style Checkbox Styles
+   =========================================================================== */
+
+.startup-options-row {
+  margin-top: 0.1rem;
+  margin-bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+  padding: 0 0.2rem;
+}
+
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-shadow: 1px 1px 0px #000;
+  text-transform: none;
+  margin-bottom: 0;
+  user-select: none;
+}
+
+.checkbox-container input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.checkbox-custom {
+  height: 18px;
+  width: 18px;
+  background-color: #11100e;
+  border: 2px solid var(--border);
+  border-radius: 2px;
+  position: relative;
+  transition: var(--transition);
+  box-shadow: inset 0 -3px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.checkbox-container:hover .checkbox-custom {
+  background-color: var(--deep-stone);
+}
+
+.checkbox-container input:checked ~ .checkbox-custom {
+  background-color: var(--grass);
+  box-shadow: inset 0 -3px rgba(0, 0, 0, 0.2);
+}
+
+.checkbox-custom:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+.checkbox-container input:checked ~ .checkbox-custom:after {
+  display: block;
+}
+
+.checkbox-container .checkbox-custom:after {
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--ink);
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
+}
+
+.checkbox-label-text {
+  letter-spacing: 0.5px;
+}

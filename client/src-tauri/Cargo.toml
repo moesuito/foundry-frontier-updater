@@ -1,6 +1,6 @@
 [package]
 name = "foundry_frontier_sync"
-version = "1.1.0"
+version = "1.2.0"
 description = "Atualizador oficial de modpacks Foundry & Frontier"
 authors = ["you"]
 edition = "2021"
@@ -20,7 +20,8 @@ tauri-build = { version = "1", features = [] }
 winresource = "0.1"
 
 [dependencies]
-tauri = { version = "1", features = ["shell-open", "dialog"] }
+tauri = { version = "1", features = [ "notification-all", "system-tray", "shell-open", "dialog", "notification", "icon-ico", "icon-png"] }
+tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.11", features = ["blocking", "json"] }

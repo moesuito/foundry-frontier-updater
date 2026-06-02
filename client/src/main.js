@@ -26,6 +26,7 @@ const instancesEmpty = document.getElementById('instancesEmpty');
 const instancesList = document.getElementById('instancesList');
 const btnManualSelect = document.getElementById('btnManualSelect');
 const btnCheckUpdates = document.getElementById('btnCheckUpdates');
+const chkAutoStart = document.getElementById('chkAutoStart');
 
 // Painel Launcher Select
 const paneLauncherSelect = document.getElementById('paneLauncherSelect');
@@ -78,6 +79,15 @@ let selectedLauncher = null;
 // Timeout para fallback de conectividade na verificação do app
 const SELF_UPDATE_FAIL_TIMEOUT_MS = 5000;
 
+// Temporizador de verificação periódica do próprio app (12 horas)
+const APP_SELF_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
+let appSelfUpdateTimer = null;
+
+// Temporizador de verificação periódica (30 minutos)
+const PERIODIC_CHECK_INTERVAL = 30 * 60 * 1000;
+let periodicCheckTimer = null;
+let isUpdatingInBackground = false;
+
 // ---------------------------------------------------------------------------
 // U1.4 — Mandatory App Self-Update Flow
 // ---------------------------------------------------------------------------
@@ -89,6 +99,7 @@ const SELF_UPDATE_FAIL_TIMEOUT_MS = 5000;
 function selfUpdateContinue() {
   paneSelfUpdate.classList.remove('active');
   paneLauncherSelect.classList.add('active');
+  startAppSelfUpdateTimer();
 }
 
 /**
@@ -216,6 +227,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Verificação obrigatória de atualização do app — bloqueia até resolver
   runSelfUpdateCheck();
 
+  // Inicialização do estado do auto-start
+  initAutoStartState();
+
+  // Sincroniza checkbox da UI com alterações de auto-start vindas do tray
+  listen('auto-start-changed', (event) => {
+    if (chkAutoStart) {
+      chkAutoStart.checked = event.payload;
+    }
+  });
+
   // Eventos de clique para seleção de launcher
   btnSelectPolyMC.addEventListener('click', () => selectLauncher('PolyMC'));
   btnSelectPrism.addEventListener('click', () => selectLauncher('Prism Launcher'));
@@ -224,10 +245,22 @@ document.addEventListener('DOMContentLoaded', () => {
   btnCheckUpdates.addEventListener('click', checkUpdates);
   btnManualSelect.addEventListener('click', selectFolderManually);
   btnChangeInstance.addEventListener('click', showSetupPane);
-  btnApplyUpdate.addEventListener('click', startUpdateProcess);
+  btnApplyUpdate.addEventListener('click', () => startUpdateProcess(false));
   btnOpenGameFolder.addEventListener('click', openGameFolder);
   btnFinishUpToDate.addEventListener('click', showSetupPane);
   btnFinishSuccess.addEventListener('click', showSetupPane);
+
+  if (chkAutoStart) {
+    chkAutoStart.addEventListener('change', async () => {
+      const checked = chkAutoStart.checked;
+      try {
+        await invoke('set_auto_start', { enable: checked });
+      } catch (err) {
+        showToast('Erro ao alterar inicialização automática.');
+        chkAutoStart.checked = !checked; // reverte estado
+      }
+    });
+  }
 });
 
 
@@ -339,6 +372,7 @@ function renderInstances() {
 function selectInstance(instance) {
   selectedInstance = instance;
   btnCheckUpdates.disabled = false;
+  startPeriodicUpdateCheck();
 }
 
 // Seleção manual de pasta
@@ -424,12 +458,14 @@ async function checkUpdates() {
   }
 }
 
-// Iniciar Processo de Atualização (Trigger do Usuário)
-async function startUpdateProcess() {
+// Iniciar Processo de Atualização (Trigger do Usuário ou Background)
+async function startUpdateProcess(isBackground = false) {
   if (pendingUpdates.length === 0 || !selectedInstance) return;
 
-  // Ir para a tela de progresso
+  // Ir para a tela de progresso (caso a janela esteja visível, ou para quando for aberta)
   paneStatus.classList.remove('active');
+  paneSetup.classList.remove('active');
+  paneSuccess.classList.remove('active');
   paneProgress.classList.add('active');
 
   progressBarFill.style.width = '0%';
@@ -501,6 +537,18 @@ async function startUpdateProcess() {
         // Vai para a tela de Sucesso
         paneProgress.classList.remove('active');
         paneSuccess.classList.add('active');
+
+        // Se for atualização em background, dispara a notificação do Windows
+        if (isBackground) {
+          try {
+            await invoke('show_notification', {
+              title: 'Modpack Atualizado!',
+              body: `O Foundry & Frontier foi atualizado para a versão ${latestVersion} e está pronto para jogar.`
+            });
+          } catch (err) {
+            console.error('Erro ao disparar notificação:', err);
+          }
+        }
       } else {
         logToUI('[Erro] A validação falhou. A versão em disco não corresponde ao esperado.', 'red');
         showToast('Falha na validação rápida da versão.');
@@ -557,4 +605,85 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// Inicializa o estado do checkbox de auto-start
+async function initAutoStartState() {
+  if (!chkAutoStart) return;
+  try {
+    const isEnabled = await invoke('is_auto_start_enabled');
+    chkAutoStart.checked = isEnabled;
+  } catch (err) {
+    console.error('Erro ao ler estado do auto-start:', err);
+  }
+}
+
+// Inicia verificação periódica de atualizações em background
+function startPeriodicUpdateCheck() {
+  if (periodicCheckTimer) clearInterval(periodicCheckTimer);
+  periodicCheckTimer = setInterval(periodicCheck, PERIODIC_CHECK_INTERVAL);
+}
+
+// Executa verificação de atualizações periódicas
+async function periodicCheck() {
+  if (!selectedInstance || isUpdatingInBackground) return;
+
+  try {
+    const data = await invoke('check_updates', {
+      currentVersion: selectedInstance.version
+    });
+
+    if (data.updateAvailable) {
+      pendingUpdates = data.updates;
+      latestVersion = data.latestVersion;
+
+      // Verifica se Minecraft (javaw.exe) está aberto
+      const mcRunning = await invoke('is_minecraft_running');
+
+      if (mcRunning) {
+        // Se estiver jogando, notifica sobre a atualização disponível
+        try {
+          await invoke('show_notification', {
+            title: 'Atualização de Modpack Disponível',
+            body: `Uma nova versão (${latestVersion}) do Foundry & Frontier está disponível. O jogo será atualizado automaticamente assim que for fechado.`
+          });
+        } catch (err) {
+          console.error('Erro ao enviar notificação:', err);
+        }
+      } else {
+        // Se não estiver jogando, aplica a atualização silenciosamente em background
+        isUpdatingInBackground = true;
+        await startUpdateProcess(true);
+      }
+    }
+  } catch (err) {
+    console.error('Erro na verificação automática de updates:', err);
+  }
+}
+
+// Inicia o temporizador de atualizações automáticas do aplicativo (12 horas)
+function startAppSelfUpdateTimer() {
+  if (appSelfUpdateTimer) clearInterval(appSelfUpdateTimer);
+  appSelfUpdateTimer = setInterval(periodicAppSelfUpdateCheck, APP_SELF_UPDATE_INTERVAL);
+}
+
+// Verifica atualizações do próprio aplicativo de 12 em 12 horas em background
+async function periodicAppSelfUpdateCheck() {
+  try {
+    const checkResult = await invoke('check_app_update');
+    if (checkResult.updateAvailable && checkResult.downloadUrl) {
+      // Baixa silenciosamente a atualização do app
+      const zipPath = await invoke('download_app_update', {
+        downloadUrl: checkResult.downloadUrl,
+      });
+      // Executa o sync-runner para aplicar e reiniciar em background se estiver minimizado
+      await invoke('launch_sync_runner', {
+        zipPath,
+        installDir: '',
+        appExe: '',
+      });
+    }
+  } catch (err) {
+    console.error('[periodic-app-update] Erro na verificação/aplicação de update do app:', err);
+  }
 }
