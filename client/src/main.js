@@ -241,16 +241,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // Eventos de clique para seleção de launcher (legado removido)
 
   btnCheckUpdates.addEventListener('click', () => {
-    if (selectedInstance && selectedInstance.updateChecked) {
-      goToStatusPaneForInstance(selectedInstance);
+    if (selectedInstance && selectedInstance.updateChecked && !selectedInstance.isUpdating) {
+      if (selectedInstance.updateAvailable) {
+        runUpdateForInstance(selectedInstance, false);
+      } else {
+        openGameFolder();
+      }
     }
   });
   btnManualSelect.addEventListener('click', selectFolderManually);
-  btnChangeInstance.addEventListener('click', showSetupPane);
-  btnApplyUpdate.addEventListener('click', () => startUpdateProcess(false));
-  btnOpenGameFolder.addEventListener('click', openGameFolder);
-  btnFinishUpToDate.addEventListener('click', showSetupPane);
-  btnFinishSuccess.addEventListener('click', showSetupPane);
+  if (btnChangeInstance) btnChangeInstance.addEventListener('click', showSetupPane);
+  if (btnApplyUpdate) btnApplyUpdate.addEventListener('click', () => startUpdateProcess(false));
+  if (btnOpenGameFolder) btnOpenGameFolder.addEventListener('click', openGameFolder);
+  if (btnFinishUpToDate) btnFinishUpToDate.addEventListener('click', showSetupPane);
+  if (btnFinishSuccess) btnFinishSuccess.addEventListener('click', showSetupPane);
 
   const btnReloadInstances = document.getElementById('btnReloadInstances');
   if (btnReloadInstances) {
@@ -288,7 +292,7 @@ function setupTitleBar() {
 
 // Mostrar Painel Setup (Voltar)
 function showSetupPane() {
-  paneStatus.classList.remove('active');
+  if (paneStatus) paneStatus.classList.remove('active');
   paneSuccess.classList.remove('active');
   paneProgress.classList.remove('active');
   
@@ -635,35 +639,37 @@ function goToStatusPaneForInstance(inst) {
   selectedInstance = inst;
   
   paneSetup.classList.remove('active');
-  paneStatus.classList.add('active');
+  if (paneStatus) paneStatus.classList.add('active');
 
-  statusLauncherTag.textContent = inst.launcher;
-  statusInstanceName.textContent = inst.instanceName;
+  if (statusLauncherTag) statusLauncherTag.textContent = inst.launcher;
+  if (statusInstanceName) statusInstanceName.textContent = inst.instanceName;
 
   if (inst.updateAvailable) {
     pendingUpdates = inst.updates;
     latestVersion = inst.latestVersion;
-    currentVerText.textContent = inst.version;
-    serverVerText.textContent = inst.latestVersion;
+    if (currentVerText) currentVerText.textContent = inst.version;
+    if (serverVerText) serverVerText.textContent = inst.latestVersion;
 
-    changelogList.innerHTML = '';
-    inst.updates.forEach(u => {
-      const item = document.createElement('div');
-      item.style.marginBottom = '0.4rem';
-      item.innerHTML = `
-        <div class="changelog-ver">Versão ${escapeHtml(u.toVersion)}</div>
-        <div class="changelog-text">${escapeHtml(u.description).replace(/\n/g, '<br>')}</div>
-      `;
-      changelogList.appendChild(item);
-    });
+    if (changelogList) {
+      changelogList.innerHTML = '';
+      inst.updates.forEach(u => {
+        const item = document.createElement('div');
+        item.style.marginBottom = '0.4rem';
+        item.innerHTML = `
+          <div class="changelog-ver">Versão ${escapeHtml(u.toVersion)}</div>
+          <div class="changelog-text">${escapeHtml(u.description).replace(/\n/g, '<br>')}</div>
+        `;
+        changelogList.appendChild(item);
+      });
+    }
 
-    statusUpdateAvailable.classList.remove('hidden');
-    statusUpToDate.classList.add('hidden');
+    if (statusUpdateAvailable) statusUpdateAvailable.classList.remove('hidden');
+    if (statusUpToDate) statusUpToDate.classList.add('hidden');
   } else {
     pendingUpdates = [];
-    activeVerBadgeText.textContent = inst.version;
-    statusUpdateAvailable.classList.add('hidden');
-    statusUpToDate.classList.remove('hidden');
+    if (activeVerBadgeText) activeVerBadgeText.textContent = inst.version;
+    if (statusUpdateAvailable) statusUpdateAvailable.classList.add('hidden');
+    if (statusUpToDate) statusUpToDate.classList.remove('hidden');
   }
 }
 
@@ -672,7 +678,7 @@ async function startUpdateProcess(isBackground = false) {
   if (pendingUpdates.length === 0 || !selectedInstance) return;
 
   // Ir para a tela de progresso (caso a janela esteja visível, ou para quando for aberta)
-  paneStatus.classList.remove('active');
+  if (paneStatus) paneStatus.classList.remove('active');
   paneSetup.classList.remove('active');
   paneSuccess.classList.remove('active');
   paneProgress.classList.add('active');
