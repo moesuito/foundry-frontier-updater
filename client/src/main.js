@@ -79,8 +79,8 @@ let selectedLauncher = null;
 // Timeout para fallback de conectividade na verificação do app
 const SELF_UPDATE_FAIL_TIMEOUT_MS = 5000;
 
-// Temporizador de verificação periódica do próprio app (12 horas)
-const APP_SELF_UPDATE_INTERVAL = 12 * 60 * 60 * 1000;
+// Temporizador de verificação periódica do próprio app (6 horas)
+const APP_SELF_UPDATE_INTERVAL = 6 * 60 * 60 * 1000;
 let appSelfUpdateTimer = null;
 
 // Temporizador de verificação periódica (30 minutos)
@@ -98,7 +98,8 @@ let isUpdatingInBackground = false;
  */
 function selfUpdateContinue() {
   paneSelfUpdate.classList.remove('active');
-  paneLauncherSelect.classList.add('active');
+  paneSetup.classList.add('active');
+  scanInstances(false);
   startAppSelfUpdateTimer();
 }
 
@@ -237,18 +238,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Eventos de clique para seleção de launcher
-  btnSelectPolyMC.addEventListener('click', () => selectLauncher('PolyMC'));
-  btnSelectPrism.addEventListener('click', () => selectLauncher('Prism Launcher'));
-  btnBackToLauncherSelect.addEventListener('click', showLauncherSelectPane);
+  // Eventos de clique para seleção de launcher (legado removido)
 
-  btnCheckUpdates.addEventListener('click', checkUpdates);
+  btnCheckUpdates.addEventListener('click', () => {
+    if (selectedInstance && selectedInstance.updateChecked) {
+      goToStatusPaneForInstance(selectedInstance);
+    }
+  });
   btnManualSelect.addEventListener('click', selectFolderManually);
   btnChangeInstance.addEventListener('click', showSetupPane);
   btnApplyUpdate.addEventListener('click', () => startUpdateProcess(false));
   btnOpenGameFolder.addEventListener('click', openGameFolder);
   btnFinishUpToDate.addEventListener('click', showSetupPane);
   btnFinishSuccess.addEventListener('click', showSetupPane);
+
+  const btnReloadInstances = document.getElementById('btnReloadInstances');
+  if (btnReloadInstances) {
+    btnReloadInstances.addEventListener('click', () => scanInstances(true));
+  }
 
   if (chkAutoStart) {
     chkAutoStart.addEventListener('change', async () => {
@@ -286,51 +293,40 @@ function showSetupPane() {
   paneProgress.classList.remove('active');
   
   // Restaura texto original do botão de busca
-  btnCheckUpdates.querySelector('span').textContent = 'Verificar Atualizações';
+  btnCheckUpdates.querySelector('span').textContent = 'Avançar';
+  btnCheckUpdates.disabled = !selectedInstance || !selectedInstance.updateChecked;
   
-  if (selectedLauncher) {
-    paneSetup.classList.add('active');
-    scanInstances(selectedLauncher); // Escaneia de novo para atualizar
-  } else {
-    paneLauncherSelect.classList.add('active');
-  }
-}
-
-// Funções de transição de launcher
-function selectLauncher(launcher) {
-  selectedLauncher = launcher;
-  selectedLauncherNameText.textContent = launcher;
-  paneLauncherSelect.classList.remove('active');
   paneSetup.classList.add('active');
-  scanInstances(launcher);
+  scanInstances(false); // Apenas recarrega (lê do config ou faz varredura inicial se vazio)
 }
 
-function showLauncherSelectPane() {
-  paneSetup.classList.remove('active');
-  paneStatus.classList.remove('active');
-  paneSuccess.classList.remove('active');
-  paneProgress.classList.remove('active');
-  paneLauncherSelect.classList.add('active');
-  selectedLauncher = null;
-}
+// Funções de transição de launcher (legado removido)
 
 // Escanear instâncias locais
-async function scanInstances(launcher) {
+async function scanInstances(forceRescan) {
   instancesStatus.classList.remove('hidden');
   instancesList.classList.add('hidden');
   instancesEmpty.classList.add('hidden');
   btnCheckUpdates.disabled = true;
 
   try {
-    detectedInstances = await invoke('detect_instances', { launcherFilter: launcher || "" });
+    detectedInstances = await invoke('detect_instances', { forceRescan: forceRescan || false });
     
     if (detectedInstances && detectedInstances.length > 0) {
       renderInstances();
       instancesStatus.classList.add('hidden');
       instancesList.classList.remove('hidden');
       
-      // Auto-seleciona a primeira encontrada
-      selectInstance(detectedInstances[0]);
+      const stillExists = selectedInstance && detectedInstances.some(inst => inst.instancePath === selectedInstance.instancePath);
+      if (!stillExists) {
+        selectInstance(detectedInstances[0]);
+      } else {
+        const current = detectedInstances.find(inst => inst.instancePath === selectedInstance.instancePath);
+        selectInstance(current);
+      }
+
+      // Inicia verificação assíncrona de atualizações para cada uma
+      checkUpdatesForLoadedInstances();
     } else {
       instancesStatus.classList.add('hidden');
       instancesEmpty.classList.remove('hidden');
@@ -342,27 +338,114 @@ async function scanInstances(launcher) {
   }
 }
 
+// Consulta assíncrona de updates de todas as instâncias em background
+async function checkUpdatesForLoadedInstances() {
+  for (let inst of detectedInstances) {
+    if (inst.updateChecked) continue;
+    try {
+      const data = await invoke('check_updates', {
+        currentVersion: inst.version
+      });
+      inst.updateChecked = true;
+      inst.updateAvailable = data.updateAvailable;
+      inst.latestVersion = data.latestVersion;
+      inst.updates = data.updates;
+    } catch (err) {
+      console.error('Erro ao verificar updates em background para ' + inst.instanceName, err);
+      inst.updateChecked = true;
+      inst.updateAvailable = false;
+      inst.updates = [];
+    }
+    renderInstances();
+    if (selectedInstance && selectedInstance.instancePath === inst.instancePath) {
+      updateSetupButtonState();
+    }
+  }
+}
+
 // Renderizar lista de instâncias
 function renderInstances() {
   instancesList.innerHTML = '';
   detectedInstances.forEach((inst, index) => {
     const card = document.createElement('div');
-    card.className = `instance-card ${selectedInstance && selectedInstance.instancePath === inst.instancePath ? 'selected' : ''}`;
+    const isSelected = selectedInstance && selectedInstance.instancePath === inst.instancePath;
     
-    card.innerHTML = `
-      <div>
-        <span class="inst-title">${escapeHtml(inst.instanceName)}</span>
-        <span class="inst-sub">${escapeHtml(inst.launcher)}</span>
-      </div>
-      <span class="inst-ver">v${escapeHtml(inst.version)}</span>
-    `;
-
-    card.addEventListener('click', () => {
-      selectInstance(inst);
-      document.querySelectorAll('.instance-card').forEach((c, idx) => {
-        c.classList.toggle('selected', idx === index);
+    if (inst.isUpdating) {
+      card.className = `instance-card selected updating`;
+      card.innerHTML = `
+        <div class="inst-details" style="width: 100%;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span class="inst-title">${escapeHtml(inst.instanceName)}</span>
+            <span class="inst-sub" style="color: var(--diamond); font-size: 1rem; font-weight: bold;">Atualizando... ${inst.updatePercent || 0}%</span>
+          </div>
+          <div class="card-progress-track">
+            <div class="card-progress-fill" style="width: ${inst.updatePercent || 0}%"></div>
+          </div>
+        </div>
+      `;
+      card.style.cursor = 'wait';
+      card.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
       });
-    });
+    } else {
+      card.className = `instance-card ${isSelected ? 'selected' : ''}`;
+      
+      let updateIndicator = '';
+      if (inst.updateChecked) {
+        if (inst.updateAvailable) {
+          updateIndicator = `
+            <button class="inst-card-update-btn" title="Atualizar Modpack" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Atualizar</span>
+            </button>
+          `;
+        }
+      } else {
+        updateIndicator = `<span class="inst-checking-badge" title="Verificando atualizações...">...</span>`;
+      }
+
+      let verClass = '';
+      if (inst.updateChecked) {
+        if (inst.updateAvailable) {
+          verClass = 'needs-update';
+        } else {
+          verClass = 'up-to-date';
+        }
+      }
+
+      card.innerHTML = `
+        <div>
+          <span class="inst-title">${escapeHtml(inst.instanceName)}</span>
+          <span class="inst-sub">${escapeHtml(inst.launcher)}</span>
+        </div>
+        <div class="inst-meta">
+          <span class="inst-ver ${verClass}">v${escapeHtml(inst.version)}</span>
+          ${updateIndicator}
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        selectInstance(inst);
+        document.querySelectorAll('.instance-card').forEach((c, idx) => {
+          c.classList.toggle('selected', idx === index);
+        });
+      });
+
+      const updateBtn = card.querySelector('.inst-card-update-btn');
+      if (updateBtn) {
+        updateBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectInstance(inst);
+          document.querySelectorAll('.instance-card').forEach((c, idx) => {
+            c.classList.toggle('selected', idx === index);
+          });
+          runUpdateForInstance(inst, false);
+        });
+      }
+    }
 
     instancesList.appendChild(card);
   });
@@ -371,7 +454,7 @@ function renderInstances() {
 // Selecionar instância
 function selectInstance(instance) {
   selectedInstance = instance;
-  btnCheckUpdates.disabled = false;
+  updateSetupButtonState();
   startPeriodicUpdateCheck();
 }
 
@@ -380,81 +463,207 @@ async function selectFolderManually() {
   try {
     const inst = await invoke('select_folder_manually');
     if (inst) {
-      detectedInstances.push(inst);
+      const existingIdx = detectedInstances.findIndex(x => x.instancePath === inst.instancePath);
+      if (existingIdx !== -1) {
+        detectedInstances[existingIdx] = inst;
+      } else {
+        detectedInstances.push(inst);
+      }
+
       renderInstances();
       instancesEmpty.classList.add('hidden');
       instancesList.classList.remove('hidden');
       selectInstance(inst);
       
-      // Atualiza visualmente o card recém adicionado
       setTimeout(() => {
+        const idx = detectedInstances.findIndex(x => x.instancePath === inst.instancePath);
         const cards = document.querySelectorAll('.instance-card');
-        cards.forEach(c => c.classList.remove('selected'));
-        if (cards.length > 0) {
-          cards[cards.length - 1].classList.add('selected');
-        }
+        cards.forEach((c, i) => c.classList.toggle('selected', i === idx));
       }, 50);
 
       showToast('Modpack selecionado com sucesso!');
+      checkUpdatesForInstance(inst);
     }
   } catch (err) {
     showToast(err.toString());
   }
 }
 
-// Verificar se há atualizações no Servidor
-async function checkUpdates() {
+// Executa verificação específica de atualizações (usado na escolha manual)
+async function checkUpdatesForInstance(inst) {
+  try {
+    const data = await invoke('check_updates', {
+      currentVersion: inst.version
+    });
+    inst.updateChecked = true;
+    inst.updateAvailable = data.updateAvailable;
+    inst.latestVersion = data.latestVersion;
+    inst.updates = data.updates;
+  } catch (err) {
+    console.error(err);
+    inst.updateChecked = true;
+    inst.updateAvailable = false;
+    inst.updates = [];
+  }
+  renderInstances();
+  if (selectedInstance && selectedInstance.instancePath === inst.instancePath) {
+    updateSetupButtonState();
+  }
+}
+
+// Atualiza o estado do botão principal na tela de setup
+function updateSetupButtonState() {
   if (!selectedInstance) {
-    showToast('Por favor, selecione uma instância.');
+    btnCheckUpdates.disabled = true;
+    btnCheckUpdates.innerHTML = `
+      <span>Avançar</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    `;
     return;
   }
 
-  btnCheckUpdates.disabled = true;
-  btnCheckUpdates.querySelector('span').textContent = 'Conectando...';
+  if (selectedInstance.isUpdating) {
+    btnCheckUpdates.disabled = true;
+    btnCheckUpdates.innerHTML = `
+      <span>Atualizando...</span>
+      <div class="loading-ring" style="width: 12px; height: 12px; border-width: 2px;"></div>
+    `;
+    return;
+  }
 
-  try {
-    const data = await invoke('check_updates', {
-      currentVersion: selectedInstance.version
-    });
+  if (!selectedInstance.updateChecked) {
+    btnCheckUpdates.disabled = true;
+    btnCheckUpdates.innerHTML = `
+      <span>Conectando...</span>
+      <div class="loading-ring" style="width: 12px; height: 12px; border-width: 2px;"></div>
+    `;
+    return;
+  }
 
-    // Mudar para o painel de status
-    paneSetup.classList.remove('active');
-    paneStatus.classList.add('active');
+  btnCheckUpdates.disabled = false;
+  if (selectedInstance.updateAvailable) {
+    btnCheckUpdates.innerHTML = `
+      <span>Atualizar Modpack</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    `;
+  } else {
+    btnCheckUpdates.innerHTML = `
+      <span>Abrir Pasta do Jogo</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+    `;
+  }
+}
 
-    // Preencher cabeçalho da instância
-    statusLauncherTag.textContent = selectedInstance.launcher;
-    statusInstanceName.textContent = selectedInstance.instanceName;
+// Inicia o processo de atualização de forma assíncrona para uma instância
+async function runUpdateForInstance(inst, isBackground = false) {
+  if (inst.isUpdating) return;
+  
+  inst.isUpdating = true;
+  inst.updatePercent = 0;
+  renderInstances();
+  updateSetupButtonState();
 
-    if (data.updateAvailable) {
-      pendingUpdates = data.updates;
-      latestVersion = data.latestVersion;
-      currentVerText.textContent = selectedInstance.version;
-      serverVerText.textContent = data.latestVersion;
+  const unlistenProgress = await listen('download-progress', (event) => {
+    const percent = event.payload;
+    inst.updatePercent = percent;
+    renderInstances();
+  });
 
-      // Renderizar changelogs
-      changelogList.innerHTML = '';
-      data.updates.forEach(u => {
-        const item = document.createElement('div');
-        item.style.marginBottom = '0.4rem';
-        item.innerHTML = `
-          <div class="changelog-ver">Versão ${escapeHtml(u.toVersion)}</div>
-          <div class="changelog-text">${escapeHtml(u.description).replace(/\n/g, '<br>')}</div>
-        `;
-        changelogList.appendChild(item);
+  const updatesToApply = inst.updates || [];
+  let success = true;
+
+  for (let i = 0; i < updatesToApply.length; i++) {
+    const update = updatesToApply[i];
+    try {
+      await invoke('apply_update', {
+        downloadUrl: update.downloadUrl,
+        toVersion: update.toVersion,
+        removedFiles: update.removedFiles,
+        minecraftPath: inst.minecraftPath
+      });
+      inst.version = update.toVersion;
+    } catch (err) {
+      console.error('Falha ao instalar v' + update.toVersion, err);
+      success = false;
+      break;
+    }
+  }
+
+  unlistenProgress();
+  inst.isUpdating = false;
+
+  if (success) {
+    try {
+      const isValid = await invoke('validate_installation', {
+        minecraftPath: inst.minecraftPath,
+        targetVersion: inst.latestVersion
       });
 
-      statusUpdateAvailable.classList.remove('hidden');
-      statusUpToDate.classList.add('hidden');
-    } else {
-      pendingUpdates = [];
-      activeVerBadgeText.textContent = selectedInstance.version;
-      statusUpdateAvailable.classList.add('hidden');
-      statusUpToDate.classList.remove('hidden');
+      if (isValid) {
+        inst.version = inst.latestVersion;
+        inst.updateAvailable = false;
+        inst.updates = [];
+        showToast('Atualização concluída com sucesso!');
+        
+        if (isBackground) {
+          try {
+            await invoke('show_notification', {
+              title: 'Modpack Atualizado!',
+              body: `O Foundry & Frontier foi atualizado para a versão ${inst.latestVersion} e está pronto para jogar.`
+            });
+          } catch (err) {
+            console.error('Erro ao disparar notificação:', err);
+          }
+        }
+      } else {
+        showToast('Falha na validação rápida da versão.');
+      }
+    } catch (err) {
+      showToast('Erro ao validar arquivos instalados.');
     }
-  } catch (err) {
-    showToast('Não foi possível conectar ao servidor de atualizações.');
-    btnCheckUpdates.disabled = false;
-    btnCheckUpdates.querySelector('span').textContent = 'Verificar Atualizações';
+  } else {
+    showToast('Ocorreu um problema ao aplicar as atualizações.');
+  }
+
+  inst.updatePercent = 0;
+  renderInstances();
+  updateSetupButtonState();
+}
+
+// Abre o painel de status pré-carregado (legado/mantido por segurança)
+function goToStatusPaneForInstance(inst) {
+  selectedInstance = inst;
+  
+  paneSetup.classList.remove('active');
+  paneStatus.classList.add('active');
+
+  statusLauncherTag.textContent = inst.launcher;
+  statusInstanceName.textContent = inst.instanceName;
+
+  if (inst.updateAvailable) {
+    pendingUpdates = inst.updates;
+    latestVersion = inst.latestVersion;
+    currentVerText.textContent = inst.version;
+    serverVerText.textContent = inst.latestVersion;
+
+    changelogList.innerHTML = '';
+    inst.updates.forEach(u => {
+      const item = document.createElement('div');
+      item.style.marginBottom = '0.4rem';
+      item.innerHTML = `
+        <div class="changelog-ver">Versão ${escapeHtml(u.toVersion)}</div>
+        <div class="changelog-text">${escapeHtml(u.description).replace(/\n/g, '<br>')}</div>
+      `;
+      changelogList.appendChild(item);
+    });
+
+    statusUpdateAvailable.classList.remove('hidden');
+    statusUpToDate.classList.add('hidden');
+  } else {
+    pendingUpdates = [];
+    activeVerBadgeText.textContent = inst.version;
+    statusUpdateAvailable.classList.add('hidden');
+    statusUpToDate.classList.remove('hidden');
   }
 }
 

@@ -158,82 +158,149 @@ fn create_bootstrap_version_json(version_json_path: &Path) -> std::io::Result<()
     Ok(())
 }
 
-// --- Comandos do Tauri ---
-
-#[tauri::command]
-fn detect_instances(launcher_filter: String) -> Vec<InstanceInfo> {
-    let mut instances = Vec::new();
-    let base_dirs = match BaseDirs::new() {
-        Some(dirs) => dirs,
-        None => return instances,
-    };
-
-    let appdata = base_dirs.data_dir();
-
-    let mut launchers = Vec::new();
-    if launcher_filter == "Prism Launcher" {
-        launchers.push(("Prism Launcher", appdata.join("PrismLauncher").join("instances")));
-    } else if launcher_filter == "PolyMC" {
-        launchers.push(("PolyMC", appdata.join("PolyMC").join("instances")));
-    } else {
-        launchers.push(("Prism Launcher", appdata.join("PrismLauncher").join("instances")));
-        launchers.push(("PolyMC", appdata.join("PolyMC").join("instances")));
+fn check_instance(instance_path: &Path, launcher_name: &str) -> Option<InstanceInfo> {
+    if !instance_path.is_dir() {
+        return None;
     }
 
-    for (launcher_name, instances_dir) in launchers {
-        if !instances_dir.exists() || !instances_dir.is_dir() {
-            continue;
-        }
+    let folder_name = instance_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Desconhecida");
 
-        if let Ok(entries) = fs::read_dir(instances_dir) {
-            for entry in entries.flatten() {
-                let instance_path = entry.path();
-                if !instance_path.is_dir() {
-                    continue;
-                }
+    let mc_paths = vec![
+        instance_path.join(".minecraft"),
+        instance_path.to_path_buf(),
+    ];
 
-                let minecraft_path = instance_path.join(".minecraft");
-                let version_json_path = minecraft_path.join("version.json");
-                let mods_path = minecraft_path.join("mods");
+    for minecraft_path in mc_paths {
+        let version_json_path = minecraft_path.join("version.json");
+        let mods_path = minecraft_path.join("mods");
 
-                let folder_name = instance_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Desconhecida");
-
-                // Caso 1: Já possui version.json
-                if version_json_path.exists() && version_json_path.is_file() {
-                    if let Ok(file_content) = fs::read_to_string(&version_json_path) {
-                        if let Ok(version_data) = serde_json::from_str::<VersionJson>(&file_content) {
-                            if version_data.pack_id == "foundry-frontier" {
-                                instances.push(InstanceInfo {
-                                    launcher: launcher_name.to_string(),
-                                    instance_name: folder_name.to_string(),
-                                    instance_path: instance_path.to_string_lossy().to_string(),
-                                    minecraft_path: minecraft_path.to_string_lossy().to_string(),
-                                    version: version_data.version,
-                                });
-                            }
-                        }
-                    }
-                }
-                // Caso 2: Não possui version.json mas tem os mods chaves (Bootstrap)
-                else if detect_initial_mods(&mods_path) {
-                    if create_bootstrap_version_json(&version_json_path).is_ok() {
-                        instances.push(InstanceInfo {
+        if version_json_path.exists() && version_json_path.is_file() {
+            if let Ok(file_content) = fs::read_to_string(&version_json_path) {
+                if let Ok(version_data) = serde_json::from_str::<VersionJson>(&file_content) {
+                    if version_data.pack_id == "foundry-frontier" {
+                        return Some(InstanceInfo {
                             launcher: launcher_name.to_string(),
                             instance_name: folder_name.to_string(),
                             instance_path: instance_path.to_string_lossy().to_string(),
                             minecraft_path: minecraft_path.to_string_lossy().to_string(),
-                            version: "1.0.0".to_string(),
+                            version: version_data.version,
                         });
                     }
                 }
             }
+        } else if detect_initial_mods(&mods_path) {
+            if create_bootstrap_version_json(&version_json_path).is_ok() {
+                return Some(InstanceInfo {
+                    launcher: launcher_name.to_string(),
+                    instance_name: folder_name.to_string(),
+                    instance_path: instance_path.to_string_lossy().to_string(),
+                    minecraft_path: minecraft_path.to_string_lossy().to_string(),
+                    version: "1.0.0".to_string(),
+                });
+            }
         }
     }
 
-    instances
+    None
+}
+
+// --- Comandos do Tauri ---
+
+#[tauri::command]
+fn detect_instances(force_rescan: bool) -> Result<Vec<InstanceInfo>, String> {
+    let base_dirs = match BaseDirs::new() {
+        Some(dirs) => dirs,
+        None => return Err("Não foi possível encontrar as pastas do usuário.".to_string()),
+    };
+
+    let appdata = base_dirs.data_dir();
+    let home_dir = base_dirs.home_dir();
+
+    let mut config = load_config();
+
+    if force_rescan || config.instances.is_empty() {
+        let mut scanned_instances = Vec::new();
+
+        let mut launchers = Vec::new();
+        launchers.push(("ATLauncher", appdata.join("ATLauncher").join("instances")));
+        launchers.push(("CurseForge", home_dir.join("curseforge").join("minecraft").join("Instances")));
+        launchers.push(("CurseForge", home_dir.join("curseforge").join("minecraft").join("instances")));
+        launchers.push(("MultiMC", appdata.join("MultiMC").join("instances")));
+        launchers.push(("ModrinthApp", appdata.join("ModrinthApp").join("profiles")));
+        launchers.push(("PolyMC", appdata.join("PolyMC").join("instances")));
+        launchers.push(("Prism Launcher", appdata.join("PrismLauncher").join("instances")));
+
+        for (launcher_name, instances_dir) in launchers {
+            if !instances_dir.exists() || !instances_dir.is_dir() {
+                continue;
+            }
+
+            if let Ok(entries) = fs::read_dir(instances_dir) {
+                for entry in entries.flatten() {
+                    let instance_path = entry.path();
+                    if let Some(inst_info) = check_instance(&instance_path, launcher_name) {
+                        scanned_instances.push(inst_info);
+                    }
+                }
+            }
+        }
+
+        if force_rescan {
+            for saved_inst in &config.instances {
+                if saved_inst.launcher == "Customizado" {
+                    let path = PathBuf::from(&saved_inst.instance_path);
+                    if path.exists() {
+                        if let Some(inst_info) = check_instance(&path, "Customizado") {
+                            scanned_instances.push(inst_info);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut unique_scanned = Vec::new();
+        for inst in scanned_instances {
+            if !unique_scanned.iter().any(|x: &InstanceInfo| x.instance_path == inst.instance_path) {
+                unique_scanned.push(inst);
+            }
+        }
+
+        config.instances = unique_scanned.iter().map(|inst| SavedInstance {
+            launcher: inst.launcher.clone(),
+            instance_name: inst.instance_name.clone(),
+            instance_path: inst.instance_path.clone(),
+            minecraft_path: inst.minecraft_path.clone(),
+        }).collect();
+
+        if let Err(e) = save_config(&config) {
+            println!("Erro ao salvar config.json: {}", e);
+        }
+    }
+
+    let mut active_instances = Vec::new();
+    let mut updated_config_instances = Vec::new();
+
+    for saved_inst in &config.instances {
+        let path = PathBuf::from(&saved_inst.instance_path);
+        if path.exists() {
+            if let Some(mut inst_info) = check_instance(&path, &saved_inst.launcher) {
+                inst_info.launcher = saved_inst.launcher.clone();
+                active_instances.push(inst_info);
+                updated_config_instances.push(saved_inst.clone());
+            }
+        }
+    }
+
+    if updated_config_instances.len() != config.instances.len() {
+        let mut updated_config = load_config();
+        updated_config.instances = updated_config_instances;
+        let _ = save_config(&updated_config);
+    }
+
+    Ok(active_instances)
 }
 
 #[tauri::command]
@@ -255,6 +322,8 @@ fn select_folder_manually() -> Result<Option<InstanceInfo>, String> {
         let version_json_path = minecraft_path.join("version.json");
         let mods_path = minecraft_path.join("mods");
 
+        let mut instance_info = None;
+
         if version_json_path.exists() {
             let content = fs::read_to_string(&version_json_path)
                 .map_err(|e| format!("Erro ao ler version.json: {}", e))?;
@@ -262,8 +331,8 @@ fn select_folder_manually() -> Result<Option<InstanceInfo>, String> {
                 .map_err(|e| format!("JSON corrompido: {}", e))?;
 
             if version_data.pack_id == "foundry-frontier" {
-                return Ok(Some(InstanceInfo {
-                    launcher: "Manual".to_string(),
+                instance_info = Some(InstanceInfo {
+                    launcher: "Customizado".to_string(),
                     instance_name: minecraft_path.parent()
                         .and_then(|p: &Path| p.file_name())
                         .and_then(|n: &std::ffi::OsStr| n.to_str())
@@ -272,13 +341,13 @@ fn select_folder_manually() -> Result<Option<InstanceInfo>, String> {
                     instance_path: selected_path.to_string_lossy().to_string(),
                     minecraft_path: minecraft_path.to_string_lossy().to_string(),
                     version: version_data.version,
-                }));
+                });
             }
         } else if detect_initial_mods(&mods_path) {
             // Bootstrap inicial manual
             if create_bootstrap_version_json(&version_json_path).is_ok() {
-                return Ok(Some(InstanceInfo {
-                    launcher: "Manual".to_string(),
+                instance_info = Some(InstanceInfo {
+                    launcher: "Customizado".to_string(),
                     instance_name: minecraft_path.parent()
                         .and_then(|p: &Path| p.file_name())
                         .and_then(|n: &std::ffi::OsStr| n.to_str())
@@ -287,9 +356,25 @@ fn select_folder_manually() -> Result<Option<InstanceInfo>, String> {
                     instance_path: selected_path.to_string_lossy().to_string(),
                     minecraft_path: minecraft_path.to_string_lossy().to_string(),
                     version: "1.0.0".to_string(),
-                }));
+                });
             }
         }
+
+        if let Some(inst) = instance_info {
+            let mut config = load_config();
+            let already_exists = config.instances.iter().any(|x| x.instance_path == inst.instance_path);
+            if !already_exists {
+                config.instances.push(SavedInstance {
+                    launcher: inst.launcher.clone(),
+                    instance_name: inst.instance_name.clone(),
+                    instance_path: inst.instance_path.clone(),
+                    minecraft_path: inst.minecraft_path.clone(),
+                });
+                let _ = save_config(&config);
+            }
+            return Ok(Some(inst));
+        }
+
         return Err("A pasta selecionada não contém uma instalação válida do Foundry & Frontier.".to_string());
     }
     Ok(None)
@@ -752,6 +837,53 @@ fn launch_sync_runner(
 
     // Exit the current app so the runner can replace our files.
     std::process::exit(0);
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SavedInstance {
+    launcher: String,
+    #[serde(rename = "instanceName")]
+    instance_name: String,
+    #[serde(rename = "instancePath")]
+    instance_path: String,
+    #[serde(rename = "minecraftPath")]
+    minecraft_path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AppConfig {
+    instances: Vec<SavedInstance>,
+}
+
+fn get_config_json_path() -> PathBuf {
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            return dir.join("config.json");
+        }
+    }
+    PathBuf::from("config.json")
+}
+
+fn load_config() -> AppConfig {
+    let path = get_config_json_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+                return config;
+            }
+        }
+    }
+    AppConfig { instances: Vec::new() }
+}
+
+fn save_config(config: &AppConfig) -> Result<(), String> {
+    let path = get_config_json_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
